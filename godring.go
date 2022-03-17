@@ -1,6 +1,5 @@
 package goring
 
-
 import (
 	"errors"
 	"runtime"
@@ -83,7 +82,7 @@ func (r *RingTBuffer[T]) CreateConsumer() (Consumer[T], error) {
 
 	return Consumer[T]{
 		id:   uint32(newConsumerId),
-		ring: RingTBuffer,
+		ring: r,
 	}, nil
 }
 

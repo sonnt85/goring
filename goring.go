@@ -42,22 +42,6 @@ func (m *Mutex) TryLock() bool {
 	return atomic.CompareAndSwapInt32((*int32)(unsafe.Pointer(&m.Mutex)), old, new)
 }
 
-// {                                               \
-//     struct timespec tv_;                        \
-//     tv_.tv_sec = 0;                             \
-//     tv_.tv_nsec = var_cnt_nano;                 \
-//     while (1)                                   \
-//     {                                           \
-//         int rval = nanosleep (&tv_, &tv_);      \
-//         if (rval == 0)                          \
-//             break;                              \
-//         else if (errno == EINTR)                \
-//             continue;                           \
-//         else                                    \
-//             break;                              \
-//     }                                           \
-//     if(var_cnt_nano < 500000)var_cnt_nano += 10;\
-// }
 func (m *Mutex) LockSmart() {
 	for {
 		if m.TryLock() {
@@ -90,8 +74,8 @@ func (m *Mutex) IsStarving() bool {
 }
 
 // RingBuffer is a circular buffer that implement io.ReaderWriter interface.
-type RingBuffer struct {
-	buf    []interface{}
+type RingBuffer[T any] struct {
+	buf    []T
 	size   int
 	r      int // next position to read
 	w      int // next position to write
@@ -100,49 +84,19 @@ type RingBuffer struct {
 }
 
 // New returns a new RingBuffer whose buffer has the given size.
-func New(size int) *RingBuffer {
-	return &RingBuffer{
-		buf:  make([]interface{}, size),
+func NewRing[T any](size int) *RingBuffer[T] {
+
+	return &RingBuffer[T]{
+		buf:  make([]T, size),
 		size: size,
 	}
 }
 
-func (r *RingBuffer) String() string {
+func (r *RingBuffer[T]) String() string {
 	return fmt.Sprintf("Cap: %d\nLength: %d\nReadAt: %d\nWrireAt: %d", r.size, r.Length(), r.r, r.w)
 }
 
-// Read reads up to len(p) bytes into p. It returns the number of bytes read (0 <= n <= len(p)) and any error encountered. Even if Read returns n < len(p), it may use all of p as scratch space during the call. If some data is available but not len(p) bytes, Read conventionally returns what is available instead of waiting for more.
-// When Read encounters an error or end-of-file condition after successfully reading n > 0 bytes, it returns the number of bytes read. It may return the (non-nil) error from the same call or return the error (and n == 0) from a subsequent call.
-// Callers should always process the n > 0 bytes returned before considering the error err. Doing so correctly handles I/O errors that happen after reading some bytes and also both of the allowed EOF behaviors.
-func (r *RingBuffer) Read(p []interface{}) (n int, err error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-
-	r.mu.Lock()
-	n, err = r.read(p)
-	r.mu.Unlock()
-	return n, err
-}
-
-// TryRead read up to len(p) elements into p like Read but it is not blocking.
-// If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
-func (r *RingBuffer) TryRead(p []interface{}) (n int, err error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-
-	ok := r.mu.TryLock()
-	if !ok {
-		return 0, ErrAccuqireLock
-	}
-
-	n, err = r.read(p)
-	r.mu.Unlock()
-	return n, err
-}
-
-func (r *RingBuffer) read(p []interface{}) (n int, err error) {
+func (r *RingBuffer[T]) read(p []T) (n int, err error) {
 	if r.w == r.r && !r.isFull {
 		return 0, ErrIsEmpty
 	}
@@ -177,57 +131,7 @@ func (r *RingBuffer) read(p []interface{}) (n int, err error) {
 	return n, err
 }
 
-// Pop reads and returns the next element from the input or ErrIsEmpty.
-func (r *RingBuffer) Pop() (b interface{}, err error) {
-	r.mu.Lock()
-	if r.w == r.r && !r.isFull {
-		r.mu.Unlock()
-		return 0, ErrIsEmpty
-	}
-	b = r.buf[r.r]
-	r.r++
-	if r.r == r.size {
-		r.r = 0
-	}
-
-	r.isFull = false
-	r.mu.Unlock()
-	return b, err
-}
-
-// Write writes len(p) bytes from p to the underlying buf.
-// It returns the number of bytes written from p (0 <= n <= len(p)) and any error encountered that caused the write to stop early.
-// Write returns a non-nil error if it returns n < len(p).
-// Write must not modify the slice data, even temporarily.
-func (r *RingBuffer) Write(p []interface{}) (n int, err error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	r.mu.Lock()
-	n, err = r.write(p)
-	r.mu.Unlock()
-
-	return n, err
-}
-
-// TryWrite writes len(p) bytes from p to the underlying buf like Write, but it is not blocking.
-// If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
-func (r *RingBuffer) TryWrite(p []interface{}) (n int, err error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	ok := r.mu.TryLock()
-	if !ok {
-		return 0, ErrAccuqireLock
-	}
-
-	n, err = r.write(p)
-	r.mu.Unlock()
-
-	return n, err
-}
-
-func (r *RingBuffer) write(p []interface{}) (n int, err error) {
+func (r *RingBuffer[T]) write(p []T) (n int, err error) {
 	if r.isFull {
 		return 0, ErrIsFull
 	}
@@ -271,28 +175,7 @@ func (r *RingBuffer) write(p []interface{}) (n int, err error) {
 	return n, err
 }
 
-// Push writes one element into buffer, and returns ErrIsFull if buffer is full.
-func (r *RingBuffer) Push(c interface{}) error {
-	r.mu.Lock()
-	err := r.writeElement(c)
-	r.mu.Unlock()
-	return err
-}
-
-// TrywriteElementElement writes one element into buffer without blocking.
-// If it has not succeeded to accquire the lock, it return ErrAccuqireLock.
-func (r *RingBuffer) TrywriteElementElement(c interface{}) error {
-	ok := r.mu.TryLock()
-	if !ok {
-		return ErrAccuqireLock
-	}
-
-	err := r.writeElement(c)
-	r.mu.Unlock()
-	return err
-}
-
-func (r *RingBuffer) writeElement(c interface{}) error {
+func (r *RingBuffer[T]) writeElement(c T) error {
 	if r.w == r.r && r.isFull {
 		return ErrIsFull
 	}
@@ -309,9 +192,111 @@ func (r *RingBuffer) writeElement(c interface{}) error {
 	return nil
 }
 
+// Read reads up to len(p) bytes into p. It returns the number of bytes read (0 <= n <= len(p)) and any error encountered. Even if Read returns n < len(p), it may use all of p as scratch space during the call. If some data is available but not len(p) bytes, Read conventionally returns what is available instead of waiting for more.
+// When Read encounters an error or end-of-file condition after successfully reading n > 0 bytes, it returns the number of bytes read. It may return the (non-nil) error from the same call or return the error (and n == 0) from a subsequent call.
+// Callers should always process the n > 0 bytes returned before considering the error err. Doing so correctly handles I/O errors that happen after reading some bytes and also both of the allowed EOF behaviors.
+func (r *RingBuffer[T]) Read(p []T) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	r.mu.LockSmart()
+	n, err = r.read(p)
+	r.mu.Unlock()
+	return n, err
+}
+
+// TryRead read up to len(p) elements into p like Read but it is not blocking.
+// If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
+func (r *RingBuffer[T]) TryRead(p []T) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	ok := r.mu.TryLock()
+	if !ok {
+		return 0, ErrAccuqireLock
+	}
+
+	n, err = r.read(p)
+	r.mu.Unlock()
+	return n, err
+}
+
+// Pop reads and returns the next element from the input or ErrIsEmpty.
+func (r *RingBuffer[T]) Pop() (b T, err error) {
+	r.mu.LockSmart()
+	if r.w == r.r && !r.isFull {
+		r.mu.Unlock()
+		return *new(T), ErrIsEmpty
+	}
+	b = r.buf[r.r]
+	r.r++
+	if r.r == r.size {
+		r.r = 0
+	}
+
+	r.isFull = false
+	r.mu.Unlock()
+	return b, err
+}
+
+// Write writes len(p) bytes from p to the underlying buf.
+// It returns the number of bytes written from p (0 <= n <= len(p)) and any error encountered that caused the write to stop early.
+// Write returns a non-nil error if it returns n < len(p).
+// Write must not modify the slice data, even temporarily.
+func (r *RingBuffer[T]) Write(p []T) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	r.mu.LockSmart()
+	n, err = r.write(p)
+	r.mu.Unlock()
+
+	return n, err
+}
+
+// TryWrite writes len(p) bytes from p to the underlying buf like Write, but it is not blocking.
+// If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
+func (r *RingBuffer[T]) TryWrite(p []T) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	ok := r.mu.TryLock()
+	if !ok {
+		return 0, ErrAccuqireLock
+	}
+
+	n, err = r.write(p)
+	r.mu.Unlock()
+
+	return n, err
+}
+
+// Push writes one element into buffer, and returns ErrIsFull if buffer is full.
+func (r *RingBuffer[T]) Push(c T) error {
+	r.mu.LockSmart()
+	err := r.writeElement(c)
+	r.mu.Unlock()
+	return err
+}
+
+// TrywriteElementElement writes one element into buffer without blocking.
+// If it has not succeeded to accquire the lock, it return ErrAccuqireLock.
+func (r *RingBuffer[T]) TrywriteElementElement(c T) error {
+	ok := r.mu.TryLock()
+	if !ok {
+		return ErrAccuqireLock
+	}
+
+	err := r.writeElement(c)
+	r.mu.Unlock()
+	return err
+}
+
 // Length return the length of available read bytes.
-func (r *RingBuffer) Length() int {
-	r.mu.Lock()
+func (r *RingBuffer[T]) Length() int {
+	r.mu.LockSmart()
 	defer r.mu.Unlock()
 
 	if r.w == r.r {
@@ -329,13 +314,13 @@ func (r *RingBuffer) Length() int {
 }
 
 // Capacity returns the size of the underlying buffer.
-func (r *RingBuffer) Capacity() int {
+func (r *RingBuffer[T]) Capacity() int {
 	return r.size
 }
 
 // Free returns the length of available bytes to write.
-func (r *RingBuffer) Free() int {
-	r.mu.Lock()
+func (r *RingBuffer[T]) Free() int {
+	r.mu.LockSmart()
 	defer r.mu.Unlock()
 
 	if r.w == r.r {
@@ -353,13 +338,13 @@ func (r *RingBuffer) Free() int {
 }
 
 // CloneBuf returns all available read elements. It does not move the read pointer and only copy the available data.
-func (r *RingBuffer) CloneBuf() []interface{} {
-	r.mu.Lock()
+func (r *RingBuffer[T]) CloneBuf() []T {
+	r.mu.LockSmart()
 	defer r.mu.Unlock()
 
 	if r.w == r.r {
 		if r.isFull {
-			buf := make([]interface{}, r.size)
+			buf := make([]T, r.size)
 			copy(buf, r.buf[r.r:])
 			copy(buf[r.size-r.r:], r.buf[:r.w])
 			return buf
@@ -368,13 +353,13 @@ func (r *RingBuffer) CloneBuf() []interface{} {
 	}
 
 	if r.w > r.r {
-		buf := make([]interface{}, r.w-r.r)
+		buf := make([]T, r.w-r.r)
 		copy(buf, r.buf[r.r:r.w])
 		return buf
 	}
 
 	n := r.size - r.r + r.w
-	buf := make([]interface{}, n)
+	buf := make([]T, n)
 
 	if r.r+n < r.size {
 		copy(buf, r.buf[r.r:r.r+n])
@@ -389,24 +374,23 @@ func (r *RingBuffer) CloneBuf() []interface{} {
 }
 
 // IsFull returns this ringbuffer is full.
-func (r *RingBuffer) IsFull() bool {
-	r.mu.Lock()
+func (r *RingBuffer[T]) IsFull() bool {
+	r.mu.LockSmart()
 	defer r.mu.Unlock()
-
 	return r.isFull
 }
 
 // IsEmpty returns this ringbuffer is empty.
-func (r *RingBuffer) IsEmpty() bool {
-	r.mu.Lock()
+func (r *RingBuffer[T]) IsEmpty() bool {
+	r.mu.LockSmart()
 	defer r.mu.Unlock()
 
 	return !r.isFull && r.w == r.r
 }
 
 // Reset the read pointer and writer pointer to zero.
-func (r *RingBuffer) Reset() {
-	r.mu.Lock()
+func (r *RingBuffer[T]) Reset() {
+	r.mu.LockSmart()
 	defer r.mu.Unlock()
 
 	r.r = 0
