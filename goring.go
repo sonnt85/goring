@@ -241,6 +241,13 @@ func (r *RingBuffer[T]) Pop() (b T, err error) {
 	return b, err
 }
 
+// TryRead read up to len(p) elements into p like Read but it is not blocking.
+// If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
+func (r *RingBuffer[T]) TryPop(p T) (err error) {
+	_, err = r.TryRead([]T{p})
+	return err
+}
+
 // Write writes len(p) bytes from p to the underlying buf.
 // It returns the number of bytes written from p (0 <= n <= len(p)) and any error encountered that caused the write to stop early.
 // Write returns a non-nil error if it returns n < len(p).
@@ -283,7 +290,7 @@ func (r *RingBuffer[T]) Push(c T) error {
 
 // TrywriteElementElement writes one element into buffer without blocking.
 // If it has not succeeded to accquire the lock, it return ErrAccuqireLock.
-func (r *RingBuffer[T]) TrywriteElementElement(c T) error {
+func (r *RingBuffer[T]) TryPush(c T) error {
 	ok := r.mu.TryLock()
 	if !ok {
 		return ErrAccuqireLock
