@@ -334,8 +334,8 @@ func (r *RingBuffer[T]) Free() int {
 	return r.size - r.w + r.r
 }
 
-// CloneBuf returns all available read elements. It does not move the read pointer and only copy the available data.
-func (r *RingBuffer[T]) CloneBuf() []T {
+// Copy returns all available read elements. It does not move the read pointer and only copy the available data.
+func (r *RingBuffer[T]) Copy() []T {
 	r.mu.LockSmart()
 	defer r.mu.Unlock()
 
@@ -381,7 +381,6 @@ func (r *RingBuffer[T]) IsFull() bool {
 func (r *RingBuffer[T]) IsEmpty() bool {
 	r.mu.LockSmart()
 	defer r.mu.Unlock()
-
 	return !r.isFull && r.w == r.r
 }
 

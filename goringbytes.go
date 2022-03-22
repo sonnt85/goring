@@ -79,7 +79,7 @@ func (r *RingBytes) Free() int {
 
 // Bytes returns all available read bytes. It does not move the read pointer and only copy the available data.
 func (r *RingBytes) Bytes() []byte {
-	return r.rb.CloneBuf()
+	return r.rb.Copy()
 }
 
 // IsFull returns this ringbuffer is full.
