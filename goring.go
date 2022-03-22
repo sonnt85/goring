@@ -28,20 +28,6 @@ type Mutex struct {
 	sync.Mutex
 }
 
-func (m *Mutex) TryLock() bool {
-	if atomic.CompareAndSwapInt32((*int32)(unsafe.Pointer(&m.Mutex)), 0, mutexLocked) {
-		return true
-	}
-
-	old := atomic.LoadInt32((*int32)(unsafe.Pointer(&m.Mutex)))
-	if old&(mutexLocked|mutexStarving|mutexWoken) != 0 {
-		return false
-	}
-
-	new := old | mutexLocked
-	return atomic.CompareAndSwapInt32((*int32)(unsafe.Pointer(&m.Mutex)), old, new)
-}
-
 func (m *Mutex) LockSmart() {
 	for {
 		if m.TryLock() {
@@ -243,9 +229,13 @@ func (r *RingBuffer[T]) Pop() (b T, err error) {
 
 // TryRead read up to len(p) elements into p like Read but it is not blocking.
 // If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
-func (r *RingBuffer[T]) TryPop(p T) (err error) {
-	_, err = r.TryRead([]T{p})
-	return err
+func (r *RingBuffer[T]) TryPop() (p T, err error) {
+	retT := make([]T, 1)
+	if _, err = r.TryRead(retT); err == nil && len(retT) == 1 {
+		return retT[0], nil
+	} else {
+		return retT[0], err
+	}
 }
 
 // Write writes len(p) bytes from p to the underlying buf.
