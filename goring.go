@@ -14,6 +14,7 @@ var (
 	ErrIsFull             = errors.New("ringbuffer is full")
 	ErrIsEmpty            = errors.New("ringbuffer is empty")
 	ErrAccuqireLock       = errors.New("no lock to accquire")
+	ErrOverflow           = errors.New("overflow")
 )
 
 const (
@@ -192,6 +193,18 @@ func (r *RingBuffer[T]) Read(p []T) (n int, err error) {
 	return n, err
 }
 
+func (r *RingBuffer[T]) ReadAll() ([]T, error) {
+	bufsize := r.Length()
+	if bufsize == 0 {
+		return nil, ErrIsEmpty
+	}
+	p := make([]T, bufsize)
+	r.mu.LockSmart()
+	_, err := r.read(p)
+	r.mu.Unlock()
+	return p, err
+}
+
 // TryRead read up to len(p) elements into p like Read but it is not blocking.
 // If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
 func (r *RingBuffer[T]) TryRead(p []T) (n int, err error) {
@@ -207,6 +220,16 @@ func (r *RingBuffer[T]) TryRead(p []T) (n int, err error) {
 	n, err = r.read(p)
 	r.mu.Unlock()
 	return n, err
+}
+
+func (r *RingBuffer[T]) TryReadAll() ([]T, error) {
+	bufsize := r.Length()
+	if bufsize == 0 {
+		return nil, ErrIsEmpty
+	}
+	p := make([]T, bufsize)
+	_, err := r.TryRead(p)
+	return p, err
 }
 
 // Pop reads and returns the next element from the input or ErrIsEmpty.

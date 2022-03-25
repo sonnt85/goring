@@ -19,10 +19,18 @@ func (r *RingBytes) Read(p []byte) (n int, err error) {
 	return r.rb.Read(p)
 }
 
+func (r *RingBytes) ReadAll() ([]byte, error) {
+	return r.rb.ReadAll()
+}
+
 // TryRead read up to len(p) bytes into p like Read but it is not blocking.
 // If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
 func (r *RingBytes) TryRead(p []byte) (n int, err error) {
 	return r.rb.TryRead(p)
+}
+
+func (r *RingBytes) TryReadAll() ([]byte, error) {
+	return r.rb.TryReadAll()
 }
 
 // ReadByte reads and returns the next byte from the input or ErrIsEmpty.
