@@ -139,8 +139,13 @@ func (pl *Playlist[T]) Remove(n int) error {
 	if lenbuf == 0 {
 		return ErrIsEmpty
 	} else {
-		if (n >= 0 && n <= lenbuf) || (n < 0 && -n <= lenbuf) {
-			pl.r = (pl.r + lenbuf + n) % lenbuf
+		if n >= 0 && n < lenbuf {
+			if lenbuf == 1 {
+				pl.buf = make([]T, 0)
+			} else {
+				copy(pl.buf[n:], pl.buf[n+1:])
+				pl.buf = pl.buf[:lenbuf-1]
+			}
 			return nil
 		} else {
 			return ErrOverflow
@@ -148,31 +153,40 @@ func (pl *Playlist[T]) Remove(n int) error {
 	}
 }
 
-func (pl *Playlist[T]) Insert(idx int, els ...T) error {
+func (pl *Playlist[T]) Insert(n int, els ...T) error {
 	pl.cond.L.Lock()
 	defer func() {
 		pl.cond.Broadcast()
 		pl.cond.L.Unlock()
 	}()
 	lenbuf := len(pl.buf)
-	if idx < 0 || (lenbuf == 0 && idx != 0) || (lenbuf != 0 && idx > lenbuf-1) {
-		return ErrOverflow
-	}
-	if lenbuf == 0 {
-		pl.buf = make([]T, len(els))
-		pl.r = 0
-		copy(pl.buf, els)
-		return nil
+	if lenbuf == 0 || len(els) == 0 {
+		return ErrIsEmpty
 	} else {
-		tmparrT := make([]T, lenbuf+len(els))
-		tmparrT = append(pl.buf[:idx])
-		pl.buf = pl.buf[:idx]
-		pl.r = 0
-		pl.buf = tmparrT
-		// copy(pl.buf, els)
-		return nil
+		if n >= 0 && n < lenbuf {
+			lenels := len(els)
+			if lenbuf == 1 {
+				pl.buf = append(els, pl.buf[0])
+			} else {
+				newbuf := make([]T, lenbuf+lenels)
+				if n == 0 {
+					copy(newbuf, els)
+					copy(newbuf[lenels:], pl.buf[1:])
+				} else if n == lenbuf-1 {
+					ene := pl.buf[lenbuf-1]
+					pl.buf = append(pl.buf, els...)
+					pl.buf = append(pl.buf, ene)
+					return nil
+				} else {
+					copy(newbuf, pl.buf[:n-1])
+					copy(newbuf[n:], els)
+					copy(newbuf[lenbuf+lenels:], els)
+				}
+				pl.buf = newbuf
+			}
+			return nil
+		} else {
+			return ErrOverflow
+		}
 	}
-
-	// pl.r = (pl.r + lenbuf - 1) % lenbuf
-	// return nil
 }
