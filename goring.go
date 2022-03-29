@@ -67,16 +67,18 @@ type RingBuffer[T any] struct {
 	r      int // next position to read
 	w      int // next position to write
 	isFull bool
-	mu     Mutex
+	cond   *sync.Cond
 }
 
 // New returns a new RingBuffer whose buffer has the given size.
 func NewRing[T any](size int) *RingBuffer[T] {
 
-	return &RingBuffer[T]{
+	ringbuf := RingBuffer[T]{
 		buf:  make([]T, size),
 		size: size,
+		cond: sync.NewCond(new(Mutex)),
 	}
+	return &ringbuf
 }
 
 func (r *RingBuffer[T]) String() string {
@@ -186,11 +188,23 @@ func (r *RingBuffer[T]) Read(p []T) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-
-	r.mu.LockSmart()
+	r.cond.L.Lock()
 	n, err = r.read(p)
-	r.mu.Unlock()
+	r.cond.L.Unlock()
 	return n, err
+}
+
+func (r *RingBuffer[T]) ReadWait(p []T) (n int) {
+	if len(p) == 0 {
+		return 0
+	}
+	r.cond.L.Lock()
+	for len(p) > r.length() {
+		r.cond.Wait()
+	}
+	n, _ = r.read(p)
+	r.cond.L.Unlock()
+	return n
 }
 
 func (r *RingBuffer[T]) ReadAll() ([]T, error) {
@@ -199,9 +213,9 @@ func (r *RingBuffer[T]) ReadAll() ([]T, error) {
 		return nil, ErrIsEmpty
 	}
 	p := make([]T, bufsize)
-	r.mu.LockSmart()
+	r.cond.L.Lock()
 	_, err := r.read(p)
-	r.mu.Unlock()
+	r.cond.L.Unlock()
 	return p, err
 }
 
@@ -211,14 +225,14 @@ func (r *RingBuffer[T]) TryRead(p []T) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-
-	ok := r.mu.TryLock()
+	// r.cond.L.(*sync.Mutex).TryLock()
+	ok := r.cond.L.(*sync.Mutex).TryLock()
 	if !ok {
 		return 0, ErrAccuqireLock
 	}
 
 	n, err = r.read(p)
-	r.mu.Unlock()
+	r.cond.L.Unlock()
 	return n, err
 }
 
@@ -234,9 +248,9 @@ func (r *RingBuffer[T]) TryReadAll() ([]T, error) {
 
 // Pop reads and returns the next element from the input or ErrIsEmpty.
 func (r *RingBuffer[T]) Pop() (b T, err error) {
-	r.mu.LockSmart()
+	r.cond.L.Lock()
 	if r.w == r.r && !r.isFull {
-		r.mu.Unlock()
+		r.cond.L.Unlock()
 		return *new(T), ErrIsEmpty
 	}
 	b = r.buf[r.r]
@@ -246,8 +260,24 @@ func (r *RingBuffer[T]) Pop() (b T, err error) {
 	}
 
 	r.isFull = false
-	r.mu.Unlock()
+	r.cond.L.Unlock()
 	return b, err
+}
+
+func (r *RingBuffer[T]) PopWait() (b T) {
+	r.cond.L.Lock()
+	for r.w == r.r && !r.isFull {
+		r.cond.Wait()
+	}
+	b = r.buf[r.r]
+	r.r++
+	if r.r == r.size {
+		r.r = 0
+	}
+
+	r.isFull = false
+	r.cond.L.Unlock()
+	return b
 }
 
 // TryRead read up to len(p) elements into p like Read but it is not blocking.
@@ -269,11 +299,31 @@ func (r *RingBuffer[T]) Write(p []T) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	r.mu.LockSmart()
+	r.cond.L.Lock()
 	n, err = r.write(p)
-	r.mu.Unlock()
+	for i := 0; i < n; i++ {
+		r.cond.Signal()
+	}
+	r.cond.L.Unlock()
 
 	return n, err
+}
+
+func (r *RingBuffer[T]) WriteWait(p []T) {
+	if len(p) == 0 {
+		return
+	}
+	r.cond.L.Lock()
+	for r.free() < len(p) {
+		r.cond.Wait()
+	}
+	n, _ := r.write(p)
+	for i := 0; i < n; i++ {
+		r.cond.Signal()
+	}
+	r.cond.L.Unlock()
+
+	return
 }
 
 // TryWrite writes len(p) bytes from p to the underlying buf like Write, but it is not blocking.
@@ -282,43 +332,71 @@ func (r *RingBuffer[T]) TryWrite(p []T) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	ok := r.mu.TryLock()
+	ok := r.cond.L.(*sync.Mutex).TryLock()
 	if !ok {
 		return 0, ErrAccuqireLock
 	}
 
 	n, err = r.write(p)
-	r.mu.Unlock()
+	r.cond.L.Unlock()
 
 	return n, err
 }
 
 // Push writes one element into buffer, and returns ErrIsFull if buffer is full.
 func (r *RingBuffer[T]) Push(c T) error {
-	r.mu.LockSmart()
+	r.cond.L.Lock()
 	err := r.writeElement(c)
-	r.mu.Unlock()
+	r.cond.Signal()
+	r.cond.L.Unlock()
 	return err
+}
+
+func (r *RingBuffer[T]) PushForce(c T) {
+	r.cond.L.Lock()
+	if r.w == r.r && r.isFull {
+		r.cond.L.Unlock()
+		r.Pop()
+		r.cond.L.Lock()
+	}
+	r.writeElement(c)
+	r.cond.Signal()
+	r.cond.L.Unlock()
+	return
+}
+
+func (r *RingBuffer[T]) PushWait(c T) {
+	r.cond.L.Lock()
+	for r.w == r.r && r.isFull {
+		r.cond.Wait()
+	}
+	r.writeElement(c)
+	r.cond.Signal()
+	r.cond.L.Unlock()
+	return
 }
 
 // TrywriteElementElement writes one element into buffer without blocking.
 // If it has not succeeded to accquire the lock, it return ErrAccuqireLock.
 func (r *RingBuffer[T]) TryPush(c T) error {
-	ok := r.mu.TryLock()
+	ok := r.cond.L.(*sync.Mutex).TryLock()
 	if !ok {
 		return ErrAccuqireLock
 	}
 
 	err := r.writeElement(c)
-	r.mu.Unlock()
+	r.cond.L.Unlock()
 	return err
 }
 
 // Length return the length of available read bytes.
 func (r *RingBuffer[T]) Length() int {
-	r.mu.LockSmart()
-	defer r.mu.Unlock()
+	r.cond.L.Lock()
+	defer r.cond.L.Unlock()
+	return r.length()
+}
 
+func (r *RingBuffer[T]) length() int {
 	if r.w == r.r {
 		if r.isFull {
 			return r.size
@@ -340,9 +418,12 @@ func (r *RingBuffer[T]) Capacity() int {
 
 // Free returns the length of available bytes to write.
 func (r *RingBuffer[T]) Free() int {
-	r.mu.LockSmart()
-	defer r.mu.Unlock()
+	r.cond.L.Lock()
+	defer r.cond.L.Unlock()
+	return r.free()
+}
 
+func (r *RingBuffer[T]) free() int {
 	if r.w == r.r {
 		if r.isFull {
 			return 0
@@ -359,8 +440,8 @@ func (r *RingBuffer[T]) Free() int {
 
 // Copy returns all available read elements. It does not move the read pointer and only copy the available data.
 func (r *RingBuffer[T]) Copy() []T {
-	r.mu.LockSmart()
-	defer r.mu.Unlock()
+	r.cond.L.Lock()
+	defer r.cond.L.Unlock()
 
 	if r.w == r.r {
 		if r.isFull {
@@ -395,22 +476,22 @@ func (r *RingBuffer[T]) Copy() []T {
 
 // IsFull returns this ringbuffer is full.
 func (r *RingBuffer[T]) IsFull() bool {
-	r.mu.LockSmart()
-	defer r.mu.Unlock()
+	r.cond.L.Lock()
+	defer r.cond.L.Unlock()
 	return r.isFull
 }
 
 // IsEmpty returns this ringbuffer is empty.
 func (r *RingBuffer[T]) IsEmpty() bool {
-	r.mu.LockSmart()
-	defer r.mu.Unlock()
+	r.cond.L.Lock()
+	defer r.cond.L.Unlock()
 	return !r.isFull && r.w == r.r
 }
 
 // Reset the read pointer and writer pointer to zero.
 func (r *RingBuffer[T]) Reset() {
-	r.mu.LockSmart()
-	defer r.mu.Unlock()
+	r.cond.L.Lock()
+	defer r.cond.L.Unlock()
 
 	r.r = 0
 	r.w = 0

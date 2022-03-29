@@ -45,11 +45,7 @@ func (pl *Playlist[T]) UpdateNewPlaylist(p []T) (changed bool) {
 		lenp := len(p)
 		pl.buf = make([]T, lenp)
 		copy(pl.buf, p)
-		if lenp == 0 {
-			pl.r = 0
-		} else {
-			pl.r = len(p) - 1
-		}
+		pl.r = 0
 		return true
 	} else {
 		return false

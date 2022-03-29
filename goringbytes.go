@@ -19,6 +19,10 @@ func (r *RingBytes) Read(p []byte) (n int, err error) {
 	return r.rb.Read(p)
 }
 
+func (r *RingBytes) ReadWait(p []byte) {
+	r.rb.ReadWait(p)
+	return
+}
 func (r *RingBytes) ReadAll() ([]byte, error) {
 	return r.rb.ReadAll()
 }
@@ -38,6 +42,11 @@ func (r *RingBytes) ReadByte() (b byte, err error) { //implement io.ByteReader
 	return r.rb.Pop()
 }
 
+// ReadByte reads and returns the next byte from the input or ErrIsEmpty.
+func (r *RingBytes) ReadByteWait() byte { //implement io.ByteReader
+	return r.rb.PopWait()
+}
+
 // Write writes len(p) bytes from p to the underlying buf.
 // It returns the number of bytes written from p (0 <= n <= len(p)) and any error encountered that caused the write to stop early.
 // Write returns a non-nil error if it returns n < len(p).
@@ -47,6 +56,11 @@ func (r *RingBytes) ReadByte() (b byte, err error) { //implement io.ByteReader
 // }
 func (r *RingBytes) Write(p []byte) (n int, err error) {
 	return r.rb.Write(p)
+}
+
+func (r *RingBytes) WriteWait(p []byte) {
+	r.rb.WriteWait(p)
+	return
 }
 
 // TryWrite writes len(p) bytes from p to the underlying buf like Write, but it is not blocking.
@@ -60,8 +74,18 @@ func (r *RingBytes) WriteByte(c byte) error { //implement io.ByteWriter
 	return r.rb.writeElement(c)
 }
 
+func (r *RingBytes) WriteByteWait(c byte) { //implement io.ByteWriter
+	r.rb.PushWait(c)
+	return
+}
+
 func (r *RingBytes) WriteString(s string) (n int, err error) {
 	return r.rb.Write([]byte(s))
+}
+
+func (r *RingBytes) WriteStringWait(s string) {
+	r.rb.WriteWait([]byte(s))
+	return
 }
 
 // TryWriteByte writes one byte into buffer without blocking.
