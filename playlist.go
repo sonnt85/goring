@@ -1,6 +1,7 @@
 package goring
 
 import (
+	"fmt"
 	"reflect"
 	"sync"
 )
@@ -25,6 +26,12 @@ func (pl *Playlist[T]) Length() int {
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
 	return len(pl.buf)
+}
+
+func (pl *Playlist[T]) String() string {
+	pl.cond.L.Lock()
+	defer pl.cond.L.Unlock()
+	return fmt.Sprintf("Length: %d\nCurrent read: %d", len(pl.buf), pl.r)
 }
 
 func (pl *Playlist[T]) Reset() {
@@ -52,7 +59,7 @@ func (pl *Playlist[T]) UpdateNewPlaylist(p []T) (changed bool) {
 	}
 }
 
-func (pl *Playlist[T]) __next_prev(wait bool, next bool) (T, error) {
+func (pl *Playlist[T]) seek(wait bool, step int) (T, error) {
 	var zero T
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
@@ -62,29 +69,38 @@ func (pl *Playlist[T]) __next_prev(wait bool, next bool) (T, error) {
 		for len(pl.buf) == 0 && wait {
 			pl.cond.Wait()
 		}
-		n := -1
-		if next {
-			n = 1
-		}
 		lenbuf := len(pl.buf)
-		pl.r = (pl.r + lenbuf + n) % lenbuf
+		// if (step >= 0 && step <= lenbuf) || (step < 0 && -step <= lenbuf) {
+		delta := pl.r + lenbuf + step
+		if delta < 0 {
+			delta = delta - (-delta/lenbuf+1)*delta
+		}
+		pl.r = delta % lenbuf
 		return pl.buf[pl.r], nil
 	}
 }
 
+func (pl *Playlist[T]) SeekWait(n int) (T, error) {
+	return pl.seek(true, n)
+}
+
+func (pl *Playlist[T]) Seek(n int) (T, error) {
+	return pl.seek(false, n)
+}
+
 func (pl *Playlist[T]) NextWait() (T, error) {
-	return pl.__next_prev(true, true)
+	return pl.seek(true, 1)
 }
 
 func (pl *Playlist[T]) Next() (T, error) {
-	return pl.__next_prev(false, true)
+	return pl.seek(false, 1)
 }
 
 func (pl *Playlist[T]) Prev() (T, error) {
-	return pl.__next_prev(false, false)
+	return pl.seek(false, -1)
 }
 func (pl *Playlist[T]) PrevWait() (T, error) {
-	return pl.__next_prev(true, false)
+	return pl.seek(true, -1)
 }
 
 func (pl *Playlist[T]) Copy() ([]T, error) {
@@ -111,7 +127,7 @@ func (pl *Playlist[T]) Current() (T, error) {
 	}
 }
 
-func (pl *Playlist[T]) Seek(n int) (T, error) {
+func (pl *Playlist[T]) _seek(n int) (T, error) {
 	var zero T
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
