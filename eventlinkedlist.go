@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-type Playlist[T any] struct {
+type EventLinkedList[T any] struct {
 	buf []T
 	r   int // next position to read
 	// mu  Mutex
@@ -14,27 +14,27 @@ type Playlist[T any] struct {
 	cond *sync.Cond
 }
 
-func NewPlaylist[T any]() *Playlist[T] {
-	return &Playlist[T]{
+func NewEventLinkedList[T any]() *EventLinkedList[T] {
+	return &EventLinkedList[T]{
 		buf:  make([]T, 0),
 		r:    0,
 		cond: sync.NewCond(new(sync.Mutex)),
 	}
 }
 
-func (pl *Playlist[T]) Length() int {
+func (pl *EventLinkedList[T]) Length() int {
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
 	return len(pl.buf)
 }
 
-func (pl *Playlist[T]) String() string {
+func (pl *EventLinkedList[T]) String() string {
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
 	return fmt.Sprintf("Length: %d\nCurrent read: %d", len(pl.buf), pl.r)
 }
 
-func (pl *Playlist[T]) Reset() {
+func (pl *EventLinkedList[T]) Reset() {
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
 	pl.buf = make([]T, 0)
@@ -42,11 +42,11 @@ func (pl *Playlist[T]) Reset() {
 	return
 }
 
-func (pl *Playlist[T]) UpdateNewPlaylist(p []T) (changed bool) {
+func (pl *EventLinkedList[T]) UpdateNewEventLinkedList(p []T) (changed bool) {
 	pl.cond.L.Lock()
 	defer func() {
-		pl.cond.Broadcast()
 		pl.cond.L.Unlock()
+		pl.cond.Broadcast()
 	}()
 	if !reflect.DeepEqual(pl.buf, p) {
 		lenp := len(p)
@@ -59,7 +59,7 @@ func (pl *Playlist[T]) UpdateNewPlaylist(p []T) (changed bool) {
 	}
 }
 
-func (pl *Playlist[T]) seek(wait bool, step int) (T, error) {
+func (pl *EventLinkedList[T]) seek(wait bool, step int) (T, error) {
 	var zero T
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
@@ -80,30 +80,30 @@ func (pl *Playlist[T]) seek(wait bool, step int) (T, error) {
 	}
 }
 
-func (pl *Playlist[T]) SeekWait(n int) (T, error) {
+func (pl *EventLinkedList[T]) SeekWait(n int) (T, error) {
 	return pl.seek(true, n)
 }
 
-func (pl *Playlist[T]) Seek(n int) (T, error) {
+func (pl *EventLinkedList[T]) Seek(n int) (T, error) {
 	return pl.seek(false, n)
 }
 
-func (pl *Playlist[T]) NextWait() (T, error) {
+func (pl *EventLinkedList[T]) NextWait() (T, error) {
 	return pl.seek(true, 1)
 }
 
-func (pl *Playlist[T]) Next() (T, error) {
+func (pl *EventLinkedList[T]) Next() (T, error) {
 	return pl.seek(false, 1)
 }
 
-func (pl *Playlist[T]) Prev() (T, error) {
+func (pl *EventLinkedList[T]) Prev() (T, error) {
 	return pl.seek(false, -1)
 }
-func (pl *Playlist[T]) PrevWait() (T, error) {
+func (pl *EventLinkedList[T]) PrevWait() (T, error) {
 	return pl.seek(true, -1)
 }
 
-func (pl *Playlist[T]) Copy() ([]T, error) {
+func (pl *EventLinkedList[T]) Copy() ([]T, error) {
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
 	lenbuf := len(pl.buf)
@@ -115,7 +115,7 @@ func (pl *Playlist[T]) Copy() ([]T, error) {
 	return retbuf, nil
 }
 
-func (pl *Playlist[T]) Current() (T, error) {
+func (pl *EventLinkedList[T]) Current() (T, error) {
 	var zero T
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
@@ -127,7 +127,7 @@ func (pl *Playlist[T]) Current() (T, error) {
 	}
 }
 
-func (pl *Playlist[T]) _seek(n int) (T, error) {
+func (pl *EventLinkedList[T]) _seek(n int) (T, error) {
 	var zero T
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
@@ -144,7 +144,7 @@ func (pl *Playlist[T]) _seek(n int) (T, error) {
 	}
 }
 
-func (pl *Playlist[T]) Remove(n int) error {
+func (pl *EventLinkedList[T]) Remove(n int) error {
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
 	lenbuf := len(pl.buf)
@@ -165,11 +165,11 @@ func (pl *Playlist[T]) Remove(n int) error {
 	}
 }
 
-func (pl *Playlist[T]) Insert(n int, els ...T) error {
+func (pl *EventLinkedList[T]) Insert(n int, els ...T) error {
 	pl.cond.L.Lock()
 	defer func() {
-		pl.cond.Broadcast()
 		pl.cond.L.Unlock()
+		pl.cond.Broadcast()
 	}()
 	lenbuf := len(pl.buf)
 	if lenbuf == 0 || len(els) == 0 {
