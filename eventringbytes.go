@@ -26,6 +26,9 @@ func (r *RingBytes) ReadWait(p []byte) {
 func (r *RingBytes) ReadAll() ([]byte, error) {
 	return r.rb.ReadAll()
 }
+func (r *RingBytes) ReadAllWait() []byte {
+	return r.rb.ReadAllWait()
+}
 
 // TryRead read up to len(p) bytes into p like Read but it is not blocking.
 // If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.

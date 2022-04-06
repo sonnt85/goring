@@ -195,6 +195,21 @@ func (r *RingBuffer[T]) ReadAll() (retval []T, err error) {
 	return
 }
 
+//wait not empty then read all
+func (r *RingBuffer[T]) ReadAllWait() (p []T) {
+	r.lockwriteread.L.Lock()
+	for r.isempty() {
+		r.lockwriteread.Wait()
+	}
+	bufsize := r.length()
+	p = make([]T, bufsize)
+	_, _ = r.read(p) //sure read all
+	r.lockwriteread.L.Unlock()
+	// r.sendeventread()
+	r.eventbroacastpop.Broadcast()
+	return p
+}
+
 // TryRead read up to len(p) elements into p like Read but it is not blocking.
 // If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
 func (r *RingBuffer[T]) TryRead(p []T) (n int, err error) {
@@ -312,19 +327,29 @@ func (r *RingBuffer[T]) Write(p []T) (n int, err error) {
 }
 
 func (r *RingBuffer[T]) WriteWait(p []T) {
-	if len(p) == 0 {
+	totalbytes := len(p)
+	if totalbytes == 0 {
 		return
 	}
-	r.lockwriteread.L.Lock()
-	for r.free() < len(p) {
-		r.lockwriteread.Wait()
+	var cntwrite, cnt int
+	cntwrite = 0
+
+	for cntwrite != totalbytes {
+		r.lockwriteread.L.Lock()
+		if r.isfull() {
+			r.lockwriteread.L.Unlock()
+			r.eventbroacastpop.Wait()
+			r.lockwriteread.L.Lock()
+		}
+		if cnt, _ = r.write(p[cntwrite:]); cnt != 0 {
+			cntwrite += cnt
+		}
+		r.lockwriteread.L.Unlock()
+
 	}
-	n, _ := r.write(p)
-	r.lockwriteread.L.Unlock()
-	for i := 0; i < n; i++ {
+	for i := 0; i < totalbytes; i++ {
 		r.lockwriteread.Signal()
 	}
-
 	return
 }
 
@@ -370,7 +395,7 @@ func (r *RingBuffer[T]) PushForce(c T) {
 //Wait for buffer is not full then Push writes one element into buffer.
 func (r *RingBuffer[T]) PushWait(c T) {
 	r.lockwriteread.L.Lock()
-	for r.w == r.r && r.isFull {
+	for r.isfull() {
 		r.lockwriteread.Wait()
 	}
 	r.writeElement(c)
