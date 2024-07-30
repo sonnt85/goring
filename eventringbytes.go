@@ -1,5 +1,11 @@
 package goring
 
+import (
+	"context"
+	"io"
+	"time"
+)
+
 // RingBytes is a circular buffer that implement io.Reader, io.ByteReader , io.ByteWriter, io.ReadWriter interface.
 type RingBytes struct {
 	rb *RingBuffer[byte]
@@ -19,10 +25,13 @@ func (r *RingBytes) Read(p []byte) (n int, err error) {
 	return r.rb.Read(p)
 }
 
+func (r *RingBytes) ReadWaitTimeOut(p []byte, timeout time.Duration, ctx ...context.Context) (n int, err error) {
+	return r.rb.ReadWaitTimeOut(p, timeout, ctx...)
+}
 func (r *RingBytes) ReadWait(p []byte) {
 	r.rb.ReadWait(p)
-	return
 }
+
 func (r *RingBytes) ReadAll() ([]byte, error) {
 	return r.rb.ReadAll()
 }
@@ -54,16 +63,59 @@ func (r *RingBytes) ReadByteWait() byte { //implement io.ByteReader
 // It returns the number of bytes written from p (0 <= n <= len(p)) and any error encountered that caused the write to stop early.
 // Write returns a non-nil error if it returns n < len(p).
 // Write must not modify the slice data, even temporarily.
-// func (r *RingBytes) Write(p []byte) (n int, err error) {
-// 	return r.Write(p)
-// }
+//
+//	func (r *RingBytes) Write(p []byte) (n int, err error) {
+//		return r.Write(p)
+//	}
 func (r *RingBytes) Write(p []byte) (n int, err error) {
 	return r.rb.Write(p)
 }
 
+func (r *RingBytes) WriteWaitTimeOut(p []byte, timeout time.Duration, ctx ...context.Context) (n int, err error) {
+	return r.rb.WriteWaitTimeOut(p, timeout, ctx...)
+}
+
+// WriteTo implements io.WriterTo.
+func (r *RingBytes) WriteTo(w io.Writer) (n int64, err error) {
+	var p []byte
+	p, err = r.ReadAll()
+	if err != nil {
+		return
+	}
+	if len(p) == 0 {
+		return 0, ErrIsEmpty
+	}
+	var ni int
+	ni, err = w.Write(p)
+	if ni > len(p) && err == nil {
+		return int64(ni), ErrInvalidWriteCount
+	}
+	if !r.IsEmpty() {
+		return int64(ni), io.ErrShortWrite
+	}
+	return int64(ni), err
+}
+
+// ReadFrom implements io.ReaderFrom.
+func (r *RingBytes) ReadFrom(rd io.Reader) (n int64, err error) {
+	p := make([]byte, 0)
+	var ni int
+	for {
+		ni, err = rd.Read(p)
+
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			return
+		}
+		r.WriteWait(p)
+		n += int64(ni)
+	}
+}
+
 func (r *RingBytes) WriteWait(p []byte) {
 	r.rb.WriteWait(p)
-	return
 }
 
 // TryWrite writes len(p) bytes from p to the underlying buf like Write, but it is not blocking.
@@ -79,7 +131,6 @@ func (r *RingBytes) WriteByte(c byte) error { //implement io.ByteWriter
 
 func (r *RingBytes) WriteByteWait(c byte) { //implement io.ByteWriter
 	r.rb.PushWait(c)
-	return
 }
 
 func (r *RingBytes) WriteString(s string) (n int, err error) {
@@ -88,13 +139,16 @@ func (r *RingBytes) WriteString(s string) (n int, err error) {
 
 func (r *RingBytes) WriteStringWait(s string) {
 	r.rb.WriteWait([]byte(s))
-	return
 }
 
 // TryWriteByte writes one byte into buffer without blocking.
 // If it has not succeeded to accquire the lock, it return ErrAccuqireLock.
 func (r *RingBytes) TryWriteByte(c byte) error {
 	return r.rb.TryPush(c)
+}
+
+func (r *RingBytes) WaitUntilEmpty() {
+	r.rb.WaitUntilEmpty()
 }
 
 // Length return the length of available read bytes.

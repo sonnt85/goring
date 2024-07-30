@@ -39,7 +39,6 @@ func (pl *EventLinkedList[T]) Reset() {
 	defer pl.cond.L.Unlock()
 	pl.buf = make([]T, 0)
 	pl.r = 0
-	return
 }
 
 func (pl *EventLinkedList[T]) UpdateNewEventLinkedList(p []T) (changed bool) {

@@ -1,7 +1,6 @@
 package goring
 
 import (
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,7 +75,6 @@ func (ew *EventWorkerMap[K]) ConfigMaxWorker(n int) {
 	ew.Lock()
 	ew.maxWorkers = n
 	ew.Unlock()
-	return
 }
 
 // Stopped returns true if this worker pool has been stopped.
@@ -104,7 +102,7 @@ func (ew *EventWorkerMap[K]) Submit(taskname string, expirationSaveTask time.Dur
 	if ew.pausePushQueue.Get() {
 		return task, ErrPausePush
 	}
-	task, err = funcmap.NewTask[K](taskname, fgid, f, params...)
+	task, err = funcmap.NewTask(taskname, fgid, f, params...)
 	if err == nil {
 		ew.qm.SetDefault(task.Id, task)
 		if expirationSaveTask >= 0 {
@@ -121,7 +119,7 @@ func (ew *EventWorkerMap[K]) SubmitForce(taskname string, expirationSaveTask tim
 	if ew.pausePushQueue.Get() {
 		return task, ErrPausePush
 	}
-	task, err = funcmap.NewTask[K](taskname, fgid, f, params...)
+	task, err = funcmap.NewTask(taskname, fgid, f, params...)
 	if err == nil {
 		ew.qm.SetDefault(task.Id, task)
 		if expirationSaveTask >= 0 {
@@ -138,7 +136,7 @@ func (ew *EventWorkerMap[K]) SubmitWithTimeout(taskname string, expirationSaveTa
 	if ew.pausePushQueue.Get() {
 		return task, ErrPausePush
 	}
-	task, err = funcmap.NewTask[K](taskname, fgid, f, params...)
+	task, err = funcmap.NewTask(taskname, fgid, f, params...)
 	if err == nil {
 		ew.qm.SetDefault(task.Id, task)
 
@@ -159,7 +157,7 @@ func (ew *EventWorkerMap[K]) TrySubmit(taskname string, expirationSaveTask time.
 	if ew.pausePushQueue.Get() {
 		return task, ErrPausePush
 	}
-	task, err = funcmap.NewTask[K](taskname, fgid, f, params...)
+	task, err = funcmap.NewTask(taskname, fgid, f, params...)
 	if err == nil {
 		ew.qm.SetDefault(task.Id, task)
 		// err = ew.q.TryPush(task)
@@ -179,7 +177,7 @@ func (ew *EventWorkerMap[K]) GetSavedTaskThenDelete(id K) (*funcmap.Task[K], boo
 	return ew.savedTasks.GetThenDelete(id)
 }
 
-func (ew *EventWorkerMap[K]) WaitUntilTaskFinishThenDelete(id K) (retvals []reflect.Value, hastask bool) {
+func (ew *EventWorkerMap[K]) WaitUntilTaskFinishThenDelete(id K) (retvals []interface{}, hastask bool) {
 	var task *funcmap.Task[K]
 	task, hastask = ew.savedTasks.Get(id)
 	if hastask {
@@ -196,7 +194,7 @@ func (ew *EventWorkerMap[K]) WaitUntilAllTaskFinish() []*funcmap.Task[K] {
 	return ew.savedTasks.Values()
 }
 
-func (ew *EventWorkerMap[K]) GetResultTask(id K) (retvals []reflect.Value, isDone bool, hastask bool) {
+func (ew *EventWorkerMap[K]) GetResultTask(id K) (retvals []interface{}, isDone bool, hastask bool) {
 	var task *funcmap.Task[K]
 	task, hastask = ew.savedTasks.Get(id)
 	if hastask {
@@ -205,7 +203,7 @@ func (ew *EventWorkerMap[K]) GetResultTask(id K) (retvals []reflect.Value, isDon
 	return
 }
 
-func (ew *EventWorkerMap[K]) GetResultTaskThenDelete(id K) (retvals []reflect.Value, isDone bool, hastask bool) {
+func (ew *EventWorkerMap[K]) GetResultTaskThenDelete(id K) (retvals []interface{}, isDone bool, hastask bool) {
 	var task *funcmap.Task[K]
 	task, hastask = ew.savedTasks.GetThenDelete(id)
 	if hastask {
@@ -215,7 +213,7 @@ func (ew *EventWorkerMap[K]) GetResultTaskThenDelete(id K) (retvals []reflect.Va
 }
 
 // SubmitWait enqueues the given function and waits for it to be executed, get return values
-func (ew *EventWorkerMap[K]) SubmitWaitDone(taskname string, fgid func() K, f interface{}, params ...interface{}) (retvals []reflect.Value, err error) {
+func (ew *EventWorkerMap[K]) SubmitWaitDone(taskname string, fgid func() K, f interface{}, params ...interface{}) (retvals []interface{}, err error) {
 	var task *funcmap.Task[K]
 	if ew.pausePushQueue.Get() {
 		return retvals, ErrPausePush
@@ -237,22 +235,22 @@ func (ew *EventWorkerMap[K]) GetNumFinishTask() uint32 {
 	return ew.numFinishTasks
 }
 
-//Stop push task to queue
+// Stop push task to queue
 func (ew *EventWorkerMap[K]) DisableQueue() {
 	ew.pausePushQueue.Set(true)
 }
 
-//Enable push task to queue
+// Enable push task to queue
 func (ew *EventWorkerMap[K]) EnableWorker() {
 	ew.pauseWorker.SetThenSendBroadcast(false)
 }
 
-//Stop push task to queue
+// Stop push task to queue
 func (ew *EventWorkerMap[K]) DisableWorker() {
 	ew.pauseWorker.Set(true)
 }
 
-//Enable push task to queue
+// Enable push task to queue
 func (ew *EventWorkerMap[K]) EnableQueue() {
 	ew.pausePushQueue.SetThenSendBroadcast(false)
 }

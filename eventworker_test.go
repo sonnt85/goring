@@ -11,6 +11,7 @@ import (
 	"github.com/sonnt85/gosutils/funcmap"
 	"github.com/sonnt85/gosutils/ppjson"
 	"github.com/stretchr/testify/require"
+	"github.com/zeebo/assert"
 )
 
 func BenchmarkEventWorker(b *testing.B) {
@@ -41,6 +42,43 @@ func printInit(i interface{}, kkk ...int32) int {
 	return ret
 }
 
+func TestTimeAfter(t *testing.T) {
+	timeoutCh := time.After(time.Millisecond * 1000 * 10)
+
+	select {
+	case <-timeoutCh:
+		t.Log("timeoutCh <-")
+	}
+
+	select {
+	case <-timeoutCh:
+		t.Log("timeoutCh <- again")
+	default:
+		t.Error("timeoutCh error")
+	}
+}
+func TestRingBuffer_PushWaitTimeOut(t *testing.T) {
+	rb := NewRing[int](10)
+
+	err := rb.PushWaitTimeOut(1, time.Second*100)
+	assert.NoError(t, err)
+	var n int
+	n, err = rb.WriteWaitTimeOut([]int{2, 3, 4, 5, 6, 7, 8, 9}, time.Second*100)
+	t.Log("n: ", n)
+
+	assert.NoError(t, err)
+	// time.Sleep(time.Second * 10)
+	// rb.Reset()
+	err = rb.PushWaitTimeOut(3, time.Second*100)
+	assert.NoError(t, err)
+	p := make([]int, 100)
+	_, err = rb.ReadWaitTimeOut(p, time.Second*100)
+	assert.NoError(t, err)
+	t.Logf("%+v", p)
+	t.Log("\ndone")
+
+}
+
 func TestEventWorker(t *testing.T) {
 	ew := NewEventWorker[string](0, 4, time.Second*2, time.Second*1)
 	ew.OnEvictedSavedTask(func(k string, t *funcmap.Task[string]) {
@@ -50,7 +88,7 @@ func TestEventWorker(t *testing.T) {
 				log.Info("Can not run: ", err)
 			}
 			if len(paras) <= 2 {
-				if val, ok := paras[0].Interface().(int); ok {
+				if val, ok := paras[0].(int); ok {
 					log.Println("timeout, deleting client: ", val)
 				}
 			}
@@ -86,7 +124,7 @@ func TestGoSched(t *testing.T) {
 	}()
 
 	for !done {
-		// runtime.Gosched()
+		runtime.Gosched()
 	}
 	fmt.Println("done!")
 }

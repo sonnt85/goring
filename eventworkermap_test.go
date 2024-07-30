@@ -51,7 +51,7 @@ func TestEventWorkerMap(t *testing.T) {
 				log.Info("Can not run: ", err)
 			}
 			if len(paras) <= 2 {
-				if val, ok := paras[0].Interface().(int); ok {
+				if val, ok := paras[0].(int); ok {
 					log.Println("timeout, deleting client: ", val)
 				}
 			}

@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	MaxConsumerError  = errors.New("max amount of consumers reached cannot create any more")
-	InvalidBufferSize = errors.New("buffer must be of size 2^n")
+	ErrMaxConsumer       = errors.New("max amount of consumers reached cannot create any more")
+	ErrInvalidBufferSize = errors.New("buffer must be of size 2^n")
 )
 
 type RingMutipleReader[T any] struct {
@@ -33,12 +33,12 @@ type Consumer[T any] struct {
 func NewRingMutipleReader[T any](size uint32, maxConsumers uint32) (rmr *RingMutipleReader[T], err error) {
 
 	if size&(size-1) != 0 {
-		err = InvalidBufferSize
+		err = ErrInvalidBufferSize
 		return
 	}
 
 	rmr = &RingMutipleReader[T]{
-		buffer:            make([]T, size+1, size+1),
+		buffer:            make([]T, size+1),
 		length:            size,
 		bitWiseLength:     size - 1,
 		headPointer:       0,
@@ -66,7 +66,7 @@ func (r *RingMutipleReader[T]) NewConsumer() (Consumer[T], error) {
 
 	var newConsumerId = r.maxConsumers
 
-	for i, _ := range r.readerActiveFlags {
+	for i := range r.readerActiveFlags {
 		if atomic.LoadUint32(&r.readerActiveFlags[i]) == 0 {
 			newConsumerId = i
 			break
@@ -74,7 +74,7 @@ func (r *RingMutipleReader[T]) NewConsumer() (Consumer[T], error) {
 	}
 
 	if newConsumerId == r.maxConsumers {
-		return Consumer[T]{}, MaxConsumerError
+		return Consumer[T]{}, ErrMaxConsumer
 	}
 
 	if uint32(newConsumerId) >= r.maximumConsumerId {
