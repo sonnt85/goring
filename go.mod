@@ -4,11 +4,8 @@ go 1.22.0
 
 require (
 	github.com/lunny/log v0.0.0-20160921050905-7887c61bf0de
-	github.com/sonnt85/goramcache v0.0.0-20230414082755-b966432b1f4a
-	github.com/sonnt85/gosutils/funcmap v0.0.0-20230927031609-2b3046a0b311
-	github.com/sonnt85/gosutils/ppjson v0.0.0-20230927031609-2b3046a0b311
-	github.com/sonnt85/gosyncutils v0.0.0-20230926071325-083ce67d3b0e
 	github.com/stretchr/testify v1.9.0
+	github.com/zeebo/assert v1.3.1
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8
 )
 
@@ -31,11 +28,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	github.com/sonnt85/gosutils/endec v0.0.0-20230927031609-2b3046a0b311 // indirect
-	github.com/sonnt85/gosutils/gogrep v0.0.0-20230927031609-2b3046a0b311 // indirect
-	github.com/sonnt85/gosutils/gosed v0.0.0-20230927031609-2b3046a0b311 // indirect
-	github.com/sonnt85/gosutils/sregexp v0.0.0-20230927031609-2b3046a0b311 // indirect
-	github.com/sonnt85/gosutils/sutils v0.0.0-20230927031609-2b3046a0b311 // indirect
 	github.com/spf13/viper v1.18.2 // indirect
 	github.com/tidwall/gjson v1.17.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
