@@ -14,7 +14,8 @@ var (
 	ErrTooManyDataToWrite = errors.New("too many data to write")
 	ErrIsFull             = errors.New("ringbuffer is full")
 	ErrIsEmpty            = errors.New("ringbuffer is empty")
-	ErrAccuqireLock       = errors.New("no lock to accquire")
+	ErrAcquireLock        = errors.New("failed to acquire lock")
+	ErrAccuqireLock       = ErrAcquireLock // Deprecated: Use ErrAcquireLock instead.
 	ErrOverflow           = errors.New("overflow")
 	ErrInvalidWriteCount  = errors.New("invalid Write count")
 )
@@ -310,7 +311,7 @@ func (r *RingBuffer[T]) TryRead(p []T) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	ok := r.eventwrite.L.(*sync.Mutex).TryLock()
+	ok := r.eventwrite.L.(*sync.RWMutex).TryLock()
 	if !ok {
 		return 0, ErrAccuqireLock
 	}
@@ -400,7 +401,7 @@ func (r *RingBuffer[T]) WaitUntilEmpty() {
 // If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
 func (r *RingBuffer[T]) TryPop() (p T, err error) {
 	var zero T
-	ok := r.eventwrite.L.(*sync.Mutex).TryLock()
+	ok := r.eventwrite.L.(*sync.RWMutex).TryLock()
 	if !ok {
 		return zero, ErrAccuqireLock
 	}
@@ -460,7 +461,7 @@ func (r *RingBuffer[T]) TryWrite(p []T) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	ok := r.eventwrite.L.(*sync.Mutex).TryLock()
+	ok := r.eventwrite.L.(*sync.RWMutex).TryLock()
 	if !ok {
 		return 0, ErrAccuqireLock
 	}
@@ -619,7 +620,7 @@ func (r *RingBuffer[T]) WriteWaitTimeOut(c []T, timeout time.Duration, ctxs ...c
 // TrywriteElementElement writes one element into buffer without blocking.
 // If it has not succeeded to accquire the lock, it return ErrAccuqireLock.
 func (r *RingBuffer[T]) TryPush(c T) error {
-	ok := r.eventwrite.L.(*sync.Mutex).TryLock()
+	ok := r.eventwrite.L.(*sync.RWMutex).TryLock()
 	if !ok {
 		return ErrAccuqireLock
 	}

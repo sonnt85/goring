@@ -11,7 +11,7 @@ var (
 	ErrInvalidBufferSize = errors.New("buffer must be of size 2^n")
 )
 
-type RingMutipleReader[T any] struct {
+type RingMultipleReader[T any] struct {
 	length            uint32
 	bitWiseLength     uint32
 	headPointer       uint32 // next position to write
@@ -26,18 +26,18 @@ type RingMutipleReader[T any] struct {
 }
 
 type Consumer[T any] struct {
-	ring *RingMutipleReader[T]
+	ring *RingMultipleReader[T]
 	id   uint32
 }
 
-func NewRingMutipleReader[T any](size uint32, maxConsumers uint32) (rmr *RingMutipleReader[T], err error) {
+func NewRingMultipleReader[T any](size uint32, maxConsumers uint32) (rmr *RingMultipleReader[T], err error) {
 
 	if size&(size-1) != 0 {
 		err = ErrInvalidBufferSize
 		return
 	}
 
-	rmr = &RingMutipleReader[T]{
+	rmr = &RingMultipleReader[T]{
 		buffer:            make([]T, size+1),
 		length:            size,
 		bitWiseLength:     size - 1,
@@ -60,7 +60,7 @@ an unclaimed/not used consumer.
 Locks can be used as it has no effect on read/write operations and is only to keep consumer consistency, thus the
 algorithm is still lockless For best performance, consumers should be preallocated before starting buffer operations
 */
-func (r *RingMutipleReader[T]) NewConsumer() (Consumer[T], error) {
+func (r *RingMultipleReader[T]) NewConsumer() (Consumer[T], error) {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -90,7 +90,7 @@ func (r *RingMutipleReader[T]) NewConsumer() (Consumer[T], error) {
 	}, nil
 }
 
-func (r *RingMutipleReader[T]) removeConsumer(consumerId uint32) {
+func (r *RingMultipleReader[T]) removeConsumer(consumerId uint32) {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -106,7 +106,7 @@ func (consumer *Consumer[T]) Get() T {
 	return consumer.ring.readIndex(consumer.id)
 }
 
-func (r *RingMutipleReader[T]) Write(value T) {
+func (r *RingMultipleReader[T]) Write(value T) {
 
 	var lastTailReaderPointerPosition uint32
 	var currentReadPosition uint32
@@ -148,7 +148,7 @@ func (r *RingMutipleReader[T]) Write(value T) {
 	}
 }
 
-func (r *RingMutipleReader[T]) readIndex(consumerId uint32) T {
+func (r *RingMultipleReader[T]) readIndex(consumerId uint32) T {
 
 	var newIndex = atomic.AddUint32(&r.readerPointers[consumerId], 1)
 

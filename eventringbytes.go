@@ -98,19 +98,20 @@ func (r *RingBytes) WriteTo(w io.Writer) (n int64, err error) {
 
 // ReadFrom implements io.ReaderFrom.
 func (r *RingBytes) ReadFrom(rd io.Reader) (n int64, err error) {
-	p := make([]byte, 0)
+	p := make([]byte, 4096)
 	var ni int
 	for {
 		ni, err = rd.Read(p)
-
+		if ni > 0 {
+			r.WriteWait(p[:ni])
+			n += int64(ni)
+		}
 		if err != nil {
 			if err == io.EOF {
-				return
+				err = nil
 			}
 			return
 		}
-		r.WriteWait(p)
-		n += int64(ni)
 	}
 }
 
