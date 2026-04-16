@@ -21,12 +21,12 @@ type EventWorkerMap[K constraints.Ordered] struct {
 	numErrorTasks    uint32
 	mapbuffsize      uint32
 	qm               *goramcache.Cache[K, *funcmap.Task[K]]
-	pausePushQueue   *gosyncutils.EventOpject[bool]
-	pauseWorker      *gosyncutils.EventOpject[bool]
+	pausePushQueue   *gosyncutils.EventObject[bool]
+	pauseWorker      *gosyncutils.EventObject[bool]
 	savedTasks       *goramcache.Cache[K, *funcmap.Task[K]]
-	numWorkerRunning *gosyncutils.EventOpject[int]
+	numWorkerRunning *gosyncutils.EventObject[int]
 	onFinishTask     func(*funcmap.Task[K])
-	brocastSubmit    *gosyncutils.EventOpject[struct{}]
+	brocastSubmit    *gosyncutils.EventObject[struct{}]
 	sync.RWMutex
 }
 
@@ -41,13 +41,13 @@ func NewEventWorkerMap[K constraints.Ordered](maxWorkers int, mapbuffsize int, d
 
 	pool := &EventWorkerMap[K]{
 		maxWorkers:       maxWorkers,
-		pausePushQueue:   gosyncutils.NewEventOpject[bool](),
-		numWorkerRunning: gosyncutils.NewEventOpject[int](),
-		pauseWorker:      gosyncutils.NewEventOpject[bool](),
+		pausePushQueue:   gosyncutils.NewEventObject[bool](),
+		numWorkerRunning: gosyncutils.NewEventObject[int](),
+		pauseWorker:      gosyncutils.NewEventObject[bool](),
 		savedTasks:       goramcache.NewCache[K, *funcmap.Task[K]](defaultExpiration, errorAllowTimeExpiration),
 		qm:               goramcache.NewCache[K, *funcmap.Task[K]](0, 0),
 		mapbuffsize:      uint32(mapbuffsize),
-		brocastSubmit:    gosyncutils.NewEventOpject[struct{}](),
+		brocastSubmit:    gosyncutils.NewEventObject[struct{}](),
 	}
 	pool.pauseWorker.Set(true)
 	// Start the task dispatcher.
@@ -108,7 +108,7 @@ func (ew *EventWorkerMap[K]) Submit(taskname string, expirationSaveTask time.Dur
 		if expirationSaveTask >= 0 {
 			ew.savedTasks.Set(task.Id, task, expirationSaveTask)
 		}
-		ew.brocastSubmit.SendBroacast()
+		ew.brocastSubmit.SendBroadcast()
 	}
 	return
 }
@@ -125,7 +125,7 @@ func (ew *EventWorkerMap[K]) SubmitForce(taskname string, expirationSaveTask tim
 		if expirationSaveTask >= 0 {
 			ew.savedTasks.Set(task.Id, task, expirationSaveTask)
 		}
-		ew.brocastSubmit.SendBroacast()
+		ew.brocastSubmit.SendBroadcast()
 	}
 	return
 }
@@ -145,7 +145,7 @@ func (ew *EventWorkerMap[K]) SubmitWithTimeout(taskname string, expirationSaveTa
 		if expirationSaveTask >= 0 {
 			ew.savedTasks.Set(task.Id, task, expirationSaveTask)
 		}
-		ew.brocastSubmit.SendBroacast()
+		ew.brocastSubmit.SendBroadcast()
 		// }
 	}
 	return
@@ -164,7 +164,7 @@ func (ew *EventWorkerMap[K]) TrySubmit(taskname string, expirationSaveTask time.
 		if expirationSaveTask >= 0 {
 			ew.savedTasks.Set(task.Id, task, expirationSaveTask)
 		}
-		ew.brocastSubmit.SendBroacast()
+		ew.brocastSubmit.SendBroadcast()
 	}
 	return
 }

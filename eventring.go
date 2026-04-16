@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,6 +29,7 @@ type RingBuffer[T any] struct {
 	r                  int // next position to read
 	w                  int // next position to write
 	isFull             bool
+	mu                 *sync.RWMutex
 	eventwrite         *sync.Cond
 	eventbroacastwrite *sync.Cond
 	eventread          *sync.Cond
@@ -36,12 +38,13 @@ type RingBuffer[T any] struct {
 
 // New returns a new RingBuffer whose buffer has the given size.
 func NewRing[T any](size int) *RingBuffer[T] {
-
+	mu := new(sync.RWMutex)
 	ringbuf := RingBuffer[T]{
 		buf:                make([]T, size),
 		size:               size,
 		maxsize:            size * 16,
-		eventwrite:         sync.NewCond(new(sync.RWMutex)),
+		mu:                 mu,
+		eventwrite:         sync.NewCond(mu),
 		eventread:          sync.NewCond(new(sync.Mutex)),
 		eventbroacastread:  sync.NewCond(new(sync.Mutex)),
 		eventbroacastwrite: sync.NewCond(new(sync.Mutex)),
@@ -166,10 +169,8 @@ func (r *RingBuffer[T]) sendeventread(n int) {
 	if n <= 0 {
 		return
 	}
-	for i := 0; i < n; i++ {
-		r.eventread.Signal() //for one wait
-	} //for one wait
-	r.eventbroacastread.Broadcast() //for everything need signal
+	r.eventread.Signal()
+	r.eventbroacastread.Broadcast()
 }
 
 //go:inline
@@ -177,10 +178,8 @@ func (r *RingBuffer[T]) sendeventwrite(n int) {
 	if n <= 0 {
 		return
 	}
-	for i := 0; i < n; i++ {
-		r.eventwrite.Signal()
-	} //for one wait
-	r.eventbroacastwrite.Broadcast() //for everything need signal
+	r.eventwrite.Signal()
+	r.eventbroacastwrite.Broadcast()
 }
 
 // Read reads up to len(p) bytes into p. It returns the number of bytes read (0 <= n <= len(p)) and any error encountered. Even if Read returns n < len(p), it may use all of p as scratch space during the call. If some data is available but not len(p) bytes, Read conventionally returns what is available instead of waiting for more.
@@ -229,7 +228,7 @@ func (r *RingBuffer[T]) ReadWaitTimeOut(c []T, timeout time.Duration, ctxs ...co
 	}
 	timeoutCh := time.After(timeout)
 	readSuccess := make(chan bool, 1)
-	isTimeOut := false
+	var isTimeOut atomic.Bool
 	go func() {
 		r.eventread.L.Lock()
 		defer func() {
@@ -239,12 +238,12 @@ func (r *RingBuffer[T]) ReadWaitTimeOut(c []T, timeout time.Duration, ctxs ...co
 			r.eventbroacastread.L.Lock()
 			r.eventbroacastread.Wait() // Wait until the buffer is not empty or a signal is received
 			r.eventbroacastread.L.Unlock()
-			if isTimeOut {
+			if isTimeOut.Load() {
 				return
 			}
 		}
 		// After being signalled, check if we've timed out before writing to the buffer
-		if isTimeOut {
+		if isTimeOut.Load() {
 			return
 		}
 		n, err = r.read(c)
@@ -261,12 +260,12 @@ func (r *RingBuffer[T]) ReadWaitTimeOut(c []T, timeout time.Duration, ctxs ...co
 		// The data was successfully pushed to the buffer
 		return
 	case <-ctx.Done(): // If the context is done before the goroutine is done
-		isTimeOut = true
+		isTimeOut.Store(true)
 		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
 		err = ctx.Err()
 		return
 	case <-timeoutCh: // If the timeout occurs before the goroutine is done
-		isTimeOut = true
+		isTimeOut.Store(true)
 		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
 		err = os.ErrDeadlineExceeded    // os.ErrDeadlineExceeded
 		return
@@ -311,7 +310,7 @@ func (r *RingBuffer[T]) TryRead(p []T) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	ok := r.eventwrite.L.(*sync.RWMutex).TryLock()
+	ok := r.mu.TryLock()
 	if !ok {
 		return 0, ErrAccuqireLock
 	}
@@ -371,26 +370,26 @@ func (r *RingBuffer[T]) PopWait() (b T) {
 }
 
 func (r *RingBuffer[T]) WaitUntilNotFull() {
-	r.eventwrite.L.(*sync.RWMutex).RLock()
+	r.mu.RLock()
 	if r.isfull() {
-		r.eventwrite.L.(*sync.RWMutex).RUnlock() //unlock free lockwriteread
+		r.mu.RUnlock() //unlock free lockwriteread
 		r.eventbroacastread.L.Lock()
 		r.eventbroacastread.Wait() //wait for any data to be read
 		r.eventbroacastread.L.Unlock()
 		return
 	} else {
-		r.eventwrite.L.(*sync.RWMutex).RUnlock()
+		r.mu.RUnlock()
 	}
 }
 
 func (r *RingBuffer[T]) WaitUntilEmpty() {
 	for {
-		r.eventwrite.L.(*sync.RWMutex).RLock()
+		r.mu.RLock()
 		if r.isempty() {
-			r.eventwrite.L.(*sync.RWMutex).RUnlock() //unlock free lockwriteread
+			r.mu.RUnlock() //unlock free lockwriteread
 			return
 		}
-		r.eventwrite.L.(*sync.RWMutex).RUnlock() //unlock free lockwriteread
+		r.mu.RUnlock() //unlock free lockwriteread
 		r.eventbroacastread.L.Lock()
 		r.eventbroacastread.Wait()
 		r.eventbroacastread.L.Unlock()
@@ -401,7 +400,7 @@ func (r *RingBuffer[T]) WaitUntilEmpty() {
 // If it has not succeeded to accquire the lock, it return 0 as n and ErrAccuqireLock.
 func (r *RingBuffer[T]) TryPop() (p T, err error) {
 	var zero T
-	ok := r.eventwrite.L.(*sync.RWMutex).TryLock()
+	ok := r.mu.TryLock()
 	if !ok {
 		return zero, ErrAccuqireLock
 	}
@@ -461,7 +460,7 @@ func (r *RingBuffer[T]) TryWrite(p []T) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	ok := r.eventwrite.L.(*sync.RWMutex).TryLock()
+	ok := r.mu.TryLock()
 	if !ok {
 		return 0, ErrAccuqireLock
 	}
@@ -532,7 +531,7 @@ func (r *RingBuffer[T]) PushWaitTimeOutOld(c T, timeout time.Duration) (err erro
 func (r *RingBuffer[T]) PushWaitTimeOut(c T, timeout time.Duration) error {
 	timeoutCh := time.After(timeout)
 	pushSuccess := make(chan bool, 1)
-	isTimeOut := false
+	var isTimeOut atomic.Bool
 	go func() {
 		r.eventwrite.L.Lock()
 		defer func() {
@@ -542,12 +541,12 @@ func (r *RingBuffer[T]) PushWaitTimeOut(c T, timeout time.Duration) error {
 			r.eventbroacastread.L.Lock()
 			r.eventbroacastread.Wait() // Wait until the buffer is not full or a signal is received
 			r.eventbroacastread.L.Unlock()
-			if isTimeOut {
+			if isTimeOut.Load() {
 				return
 			}
 		}
 		// After being signalled, check if we've timed out before writing to the buffer
-		if isTimeOut {
+		if isTimeOut.Load() {
 			return
 		}
 		r.writeElement(c)
@@ -560,7 +559,7 @@ func (r *RingBuffer[T]) PushWaitTimeOut(c T, timeout time.Duration) error {
 		// The data was successfully pushed to the buffer
 		return nil
 	case <-timeoutCh: // If the timeout occurs before the goroutine is done
-		isTimeOut = true
+		isTimeOut.Store(true)
 		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
 		return os.ErrDeadlineExceeded
 	}
@@ -572,7 +571,7 @@ func (r *RingBuffer[T]) WriteWaitTimeOut(c []T, timeout time.Duration, ctxs ...c
 	}
 	timeoutCh := time.After(timeout)
 	pushSuccess := make(chan bool, 1)
-	isTimeOut := false
+	var isTimeOut atomic.Bool
 	go func() {
 		r.eventwrite.L.Lock()
 		defer func() {
@@ -582,12 +581,12 @@ func (r *RingBuffer[T]) WriteWaitTimeOut(c []T, timeout time.Duration, ctxs ...c
 			r.eventbroacastread.L.Lock()
 			r.eventbroacastread.Wait() // Wait until the buffer is not full or a signal is received
 			r.eventbroacastread.L.Unlock()
-			if isTimeOut {
+			if isTimeOut.Load() {
 				return
 			}
 		}
 		// After being signalled, check if we've timed out before writing to the buffer
-		if isTimeOut {
+		if isTimeOut.Load() {
 			return
 		}
 		n, err = r.write(c)
@@ -604,13 +603,13 @@ func (r *RingBuffer[T]) WriteWaitTimeOut(c []T, timeout time.Duration, ctxs ...c
 		// The data was successfully pushed to the buffer
 		return
 	case <-ctx.Done():
-		isTimeOut = true
+		isTimeOut.Store(true)
 		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
 		err = ctx.Err()
 		return
 
 	case <-timeoutCh: // If the timeout occurs before the goroutine is done
-		isTimeOut = true
+		isTimeOut.Store(true)
 		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
 		err = os.ErrDeadlineExceeded
 		return
@@ -620,7 +619,7 @@ func (r *RingBuffer[T]) WriteWaitTimeOut(c []T, timeout time.Duration, ctxs ...c
 // TrywriteElementElement writes one element into buffer without blocking.
 // If it has not succeeded to accquire the lock, it return ErrAccuqireLock.
 func (r *RingBuffer[T]) TryPush(c T) error {
-	ok := r.eventwrite.L.(*sync.RWMutex).TryLock()
+	ok := r.mu.TryLock()
 	if !ok {
 		return ErrAccuqireLock
 	}
@@ -635,8 +634,8 @@ func (r *RingBuffer[T]) TryPush(c T) error {
 
 // Length return the length of available read bytes.
 func (r *RingBuffer[T]) Length() int {
-	r.eventwrite.L.(*sync.RWMutex).RLock()
-	defer r.eventwrite.L.(*sync.RWMutex).RUnlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.length()
 }
 
@@ -662,8 +661,8 @@ func (r *RingBuffer[T]) Capacity() int {
 
 // Free returns the length of available bytes to write.
 func (r *RingBuffer[T]) Free() int {
-	r.eventwrite.L.(*sync.RWMutex).RLock()
-	defer r.eventwrite.L.(*sync.RWMutex).RUnlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.free()
 }
 
@@ -685,8 +684,8 @@ func (r *RingBuffer[T]) free() int {
 
 // Copy returns all available read elements. It does not move the read pointer and only copy the available data.
 func (r *RingBuffer[T]) Copy() []T {
-	r.eventwrite.L.(*sync.RWMutex).RLock()
-	defer r.eventwrite.L.(*sync.RWMutex).RUnlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	if r.w == r.r {
 		if r.isFull {
@@ -721,8 +720,8 @@ func (r *RingBuffer[T]) Copy() []T {
 
 // IsFull returns this ringbuffer is full.
 func (r *RingBuffer[T]) IsFull() bool {
-	r.eventwrite.L.(*sync.RWMutex).RLock()
-	defer r.eventwrite.L.(*sync.RWMutex).RUnlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.isfull()
 }
 
@@ -762,13 +761,14 @@ func (r *RingBuffer[T]) resize() (changed bool) {
 	}
 	r.size = newsize
 	copy(newBuf, r.buf)
+	r.buf = newBuf
 	return true
 }
 
 // IsEmpty returns this ringbuffer is empty.
 func (r *RingBuffer[T]) IsEmpty() bool {
-	r.eventwrite.L.(*sync.RWMutex).RLock()
-	defer r.eventwrite.L.(*sync.RWMutex).RUnlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.isempty()
 }
 

@@ -21,10 +21,10 @@ type EventWorker[K constraints.Ordered] struct {
 	numFinishTasks   uint32
 	numErrorTasks    uint32
 	q                *RingBuffer[*funcmap.Task[K]]
-	pausePushQueue   *gosyncutils.EventOpject[bool]
-	pauseWorker      *gosyncutils.EventOpject[bool]
+	pausePushQueue   *gosyncutils.EventObject[bool]
+	pauseWorker      *gosyncutils.EventObject[bool]
 	savedTasks       *goramcache.Cache[K, *funcmap.Task[K]]
-	numWorkerRunning *gosyncutils.EventOpject[int]
+	numWorkerRunning *gosyncutils.EventObject[int]
 	onFinishTask     func(*funcmap.Task[K])
 
 	sync.RWMutex
@@ -46,9 +46,9 @@ func NewEventWorker[K constraints.Ordered](maxWorkers int, buffsize int, default
 	pool := &EventWorker[K]{
 		maxWorkers:       maxWorkers,
 		q:                NewRing[*funcmap.Task[K]](buffsize),
-		pausePushQueue:   gosyncutils.NewEventOpject[bool](),
-		numWorkerRunning: gosyncutils.NewEventOpject[int](),
-		pauseWorker:      gosyncutils.NewEventOpject[bool](),
+		pausePushQueue:   gosyncutils.NewEventObject[bool](),
+		numWorkerRunning: gosyncutils.NewEventObject[int](),
+		pauseWorker:      gosyncutils.NewEventObject[bool](),
 		savedTasks:       goramcache.NewCache[K, *funcmap.Task[K]](defaultExpiration, errorAllowTimeExpiration),
 	}
 	pool.pauseWorker.Set(true)
