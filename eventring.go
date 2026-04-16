@@ -7,7 +7,6 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -226,50 +225,49 @@ func (r *RingBuffer[T]) ReadWaitTimeOut(c []T, timeout time.Duration, ctxs ...co
 	if timeout <= 0 {
 		timeout = 1<<63 - 1
 	}
-	timeoutCh := time.After(timeout)
-	readSuccess := make(chan bool, 1)
-	var isTimeOut atomic.Bool
-	go func() {
-		r.eventread.L.Lock()
-		defer func() {
-			r.eventread.L.Unlock()
-		}()
-		for r.isempty() {
-			r.eventbroacastread.L.Lock()
-			r.eventbroacastread.Wait() // Wait until the buffer is not empty or a signal is received
-			r.eventbroacastread.L.Unlock()
-			if isTimeOut.Load() {
-				return
-			}
-		}
-		// After being signalled, check if we've timed out before writing to the buffer
-		if isTimeOut.Load() {
-			return
-		}
-		n, err = r.read(c)
-		r.sendeventread(n)
-		readSuccess <- true
-	}()
 	ctx := context.Background()
 	if len(ctxs) > 0 {
 		ctx = ctxs[0]
 	}
-
-	select {
-	case <-readSuccess:
-		// The data was successfully pushed to the buffer
-		return
-	case <-ctx.Done(): // If the context is done before the goroutine is done
-		isTimeOut.Store(true)
-		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
-		err = ctx.Err()
-		return
-	case <-timeoutCh: // If the timeout occurs before the goroutine is done
-		isTimeOut.Store(true)
-		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
-		err = os.ErrDeadlineExceeded    // os.ErrDeadlineExceeded
-		return
+	deadline := time.Now().Add(timeout)
+	r.eventread.L.Lock()
+	defer r.eventread.L.Unlock()
+	for r.isempty() {
+		// Check context cancellation first.
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0, os.ErrDeadlineExceeded
+		}
+		// Wake the Wait at deadline or on context cancellation.
+		timer := time.AfterFunc(remaining, func() {
+			r.eventbroacastwrite.Broadcast()
+		})
+		ctxStop := context.AfterFunc(ctx, func() {
+			r.eventbroacastwrite.Broadcast()
+		})
+		r.eventbroacastwrite.L.Lock()
+		r.eventbroacastwrite.Wait()
+		r.eventbroacastwrite.L.Unlock()
+		timer.Stop()
+		ctxStop()
+		// Re-check context and deadline after wake-up.
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+		if time.Now().After(deadline) {
+			return 0, os.ErrDeadlineExceeded
+		}
 	}
+	n, err = r.read(c)
+	r.sendeventread(n)
+	return
 }
 
 func (r *RingBuffer[T]) ReadAll() (retval []T, err error) {
@@ -529,91 +527,79 @@ func (r *RingBuffer[T]) PushWaitTimeOutOld(c T, timeout time.Duration) (err erro
 }
 
 func (r *RingBuffer[T]) PushWaitTimeOut(c T, timeout time.Duration) error {
-	timeoutCh := time.After(timeout)
-	pushSuccess := make(chan bool, 1)
-	var isTimeOut atomic.Bool
-	go func() {
-		r.eventwrite.L.Lock()
-		defer func() {
-			r.eventwrite.L.Unlock()
-		}()
-		for r.isfull() {
-			r.eventbroacastread.L.Lock()
-			r.eventbroacastread.Wait() // Wait until the buffer is not full or a signal is received
-			r.eventbroacastread.L.Unlock()
-			if isTimeOut.Load() {
-				return
-			}
+	deadline := time.Now().Add(timeout)
+	r.eventwrite.L.Lock()
+	defer r.eventwrite.L.Unlock()
+	for r.isfull() {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return os.ErrDeadlineExceeded
 		}
-		// After being signalled, check if we've timed out before writing to the buffer
-		if isTimeOut.Load() {
-			return
+		// Schedule a Broadcast at the deadline so Wait() is guaranteed to
+		// return even if no reader signals eventbroacastread in time.
+		timer := time.AfterFunc(remaining, func() {
+			r.eventbroacastread.Broadcast()
+		})
+		r.eventbroacastread.L.Lock()
+		r.eventbroacastread.Wait()
+		r.eventbroacastread.L.Unlock()
+		timer.Stop()
+		if time.Now().After(deadline) {
+			return os.ErrDeadlineExceeded
 		}
-		r.writeElement(c)
-		r.sendeventwrite(1)
-		pushSuccess <- true
-	}()
-
-	select {
-	case <-pushSuccess:
-		// The data was successfully pushed to the buffer
-		return nil
-	case <-timeoutCh: // If the timeout occurs before the goroutine is done
-		isTimeOut.Store(true)
-		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
-		return os.ErrDeadlineExceeded
 	}
+	r.writeElement(c)
+	r.sendeventwrite(1)
+	return nil
 }
 
 func (r *RingBuffer[T]) WriteWaitTimeOut(c []T, timeout time.Duration, ctxs ...context.Context) (n int, err error) {
 	if timeout <= 0 {
 		timeout = 1<<63 - 1
 	}
-	timeoutCh := time.After(timeout)
-	pushSuccess := make(chan bool, 1)
-	var isTimeOut atomic.Bool
-	go func() {
-		r.eventwrite.L.Lock()
-		defer func() {
-			r.eventwrite.L.Unlock()
-		}()
-		for r.isfull() {
-			r.eventbroacastread.L.Lock()
-			r.eventbroacastread.Wait() // Wait until the buffer is not full or a signal is received
-			r.eventbroacastread.L.Unlock()
-			if isTimeOut.Load() {
-				return
-			}
-		}
-		// After being signalled, check if we've timed out before writing to the buffer
-		if isTimeOut.Load() {
-			return
-		}
-		n, err = r.write(c)
-		r.sendeventwrite(n)
-		pushSuccess <- true
-	}()
-
 	ctx := context.Background()
 	if len(ctxs) > 0 {
 		ctx = ctxs[0]
 	}
-	select {
-	case <-pushSuccess:
-		// The data was successfully pushed to the buffer
-		return
-	case <-ctx.Done():
-		isTimeOut.Store(true)
-		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
-		err = ctx.Err()
-		return
-
-	case <-timeoutCh: // If the timeout occurs before the goroutine is done
-		isTimeOut.Store(true)
-		r.eventbroacastread.Broadcast() // Wake up all goroutines waiting on r.eventbroacastread
-		err = os.ErrDeadlineExceeded
-		return
+	deadline := time.Now().Add(timeout)
+	r.eventwrite.L.Lock()
+	defer r.eventwrite.L.Unlock()
+	for r.isfull() {
+		// Check context cancellation first.
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0, os.ErrDeadlineExceeded
+		}
+		// Wake the Wait at deadline or on context cancellation.
+		timer := time.AfterFunc(remaining, func() {
+			r.eventbroacastread.Broadcast()
+		})
+		ctxStop := context.AfterFunc(ctx, func() {
+			r.eventbroacastread.Broadcast()
+		})
+		r.eventbroacastread.L.Lock()
+		r.eventbroacastread.Wait()
+		r.eventbroacastread.L.Unlock()
+		timer.Stop()
+		ctxStop()
+		// Re-check context and deadline after wake-up.
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+		if time.Now().After(deadline) {
+			return 0, os.ErrDeadlineExceeded
+		}
 	}
+	n, err = r.write(c)
+	r.sendeventwrite(n)
+	return
 }
 
 // TrywriteElementElement writes one element into buffer without blocking.

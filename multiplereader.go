@@ -24,9 +24,9 @@ type RingMultipleReader[T any] struct {
 	headPointer       uint32 // next position to write
 	maximumConsumerId uint32
 	maxConsumers      int
-	*sync.RWMutex
-	*sync.Cond
-	readEvent         *sync.Cond
+	rwmu              *sync.RWMutex // protects buffer writes
+	writeCond         *sync.Cond    // signals new data available (uses its own Mutex, not rwmu)
+	readEvent         *sync.Cond   // signals reads completed
 	buffer            []T
 	readerPointers    []paddedUint32
 	readerActiveFlags []paddedUint32
@@ -51,12 +51,14 @@ func NewRingMultipleReader[T any](size uint32, maxConsumers uint32) (rmr *RingMu
 		headPointer:       0,
 		maximumConsumerId: 0,
 		maxConsumers:      int(maxConsumers),
-		RWMutex:           &sync.RWMutex{},
+		rwmu:              &sync.RWMutex{},
 		readerPointers:    make([]paddedUint32, maxConsumers),
 		readerActiveFlags: make([]paddedUint32, maxConsumers),
 	}
 	rmr.readEvent = sync.NewCond(&sync.Mutex{})
-	rmr.Cond = sync.NewCond(rmr.RWMutex)
+	// writeCond uses its own plain Mutex (not rwmu) so that readers waiting
+	// for data do not hold the write lock and block each other.
+	rmr.writeCond = sync.NewCond(&sync.Mutex{})
 	return
 }
 
@@ -68,8 +70,8 @@ Locks can be used as it has no effect on read/write operations and is only to ke
 algorithm is still lockless For best performance, consumers should be preallocated before starting buffer operations
 */
 func (r *RingMultipleReader[T]) NewConsumer() (Consumer[T], error) {
-	r.RLock()
-	defer r.RUnlock()
+	r.rwmu.RLock()
+	defer r.rwmu.RUnlock()
 
 	var newConsumerId = r.maxConsumers
 
@@ -98,8 +100,8 @@ func (r *RingMultipleReader[T]) NewConsumer() (Consumer[T], error) {
 }
 
 func (r *RingMultipleReader[T]) removeConsumer(consumerId uint32) {
-	r.RLock()
-	defer r.RUnlock()
+	r.rwmu.RLock()
+	defer r.rwmu.RUnlock()
 
 	atomic.StoreUint32(&r.readerActiveFlags[consumerId].v, 0)
 	atomic.CompareAndSwapUint32(&r.maximumConsumerId, consumerId, r.maximumConsumerId-1)
@@ -144,7 +146,7 @@ func (r *RingMultipleReader[T]) Write(value T) {
 		if lastTailReaderPointerPosition > r.headPointer {
 			r.buffer[r.headPointer&r.bitWiseLength] = value
 			atomic.AddUint32(&r.headPointer, 1)
-			r.Broadcast()
+			r.writeCond.Broadcast()
 			return
 		} else {
 			r.readEvent.L.Lock()
@@ -159,12 +161,17 @@ func (r *RingMultipleReader[T]) readIndex(consumerId uint32) T {
 
 	var newIndex = atomic.AddUint32(&r.readerPointers[consumerId].v, 1)
 
-	// yield until work is available
+	// Yield until data is available at newIndex.
+	// writeCond uses its own plain Mutex (independent of rwmu) so that
+	// multiple consumers can wait concurrently without blocking each other
+	// or blocking the writer.
 	for newIndex >= atomic.LoadUint32(&r.headPointer) {
-		r.Lock()
-		r.Wait()
-		r.Unlock()
-		// runtime.Gosched()
+		r.writeCond.L.Lock()
+		// Re-check under lock to avoid missed wake-ups.
+		if newIndex >= atomic.LoadUint32(&r.headPointer) {
+			r.writeCond.Wait()
+		}
+		r.writeCond.L.Unlock()
 	}
 	r.readEvent.Broadcast()
 	return r.buffer[newIndex&r.bitWiseLength]
