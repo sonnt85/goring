@@ -170,6 +170,8 @@ func (r *RingBuffer[T]) sendeventread(n int) {
 	}
 	r.eventread.Signal()
 	r.eventbroacastread.Broadcast()
+	// Signal eventwrite so PushWait/WriteWait unblock when buffer has space again.
+	r.eventwrite.Signal()
 }
 
 //go:inline
@@ -483,9 +485,9 @@ func (r *RingBuffer[T]) Push(c T) error {
 func (r *RingBuffer[T]) PushForce(c T) {
 	r.eventwrite.L.Lock()
 	if r.isfull() {
-		r.readElement() // remove element
+		_, _ = r.readElement() // remove oldest element to make room
 	}
-	r.writeElement(c)
+	_ = r.writeElement(c)
 	r.eventwrite.L.Unlock()
 	r.sendeventwrite(1)
 }
@@ -496,7 +498,7 @@ func (r *RingBuffer[T]) PushWait(c T) {
 	for r.isfull() {
 		r.eventwrite.Wait()
 	}
-	r.writeElement(c)
+	_ = r.writeElement(c)
 	r.eventwrite.L.Unlock()
 	r.sendeventwrite(1)
 }
@@ -520,7 +522,7 @@ func (r *RingBuffer[T]) PushWaitTimeOutOld(c T, timeout time.Duration) (err erro
 			break
 		}
 	}
-	r.writeElement(c)
+	_ = r.writeElement(c)
 	r.eventwrite.L.Unlock()
 	r.sendeventwrite(1) //signal for write new data
 	return
@@ -548,7 +550,7 @@ func (r *RingBuffer[T]) PushWaitTimeOut(c T, timeout time.Duration) error {
 			return os.ErrDeadlineExceeded
 		}
 	}
-	r.writeElement(c)
+	_ = r.writeElement(c)
 	r.sendeventwrite(1)
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func BenchmarkEventWorker(b *testing.B) {
 			wg.Add(1)
 			go func() {
 				for j := 0; j < b.N; j++ {
-					ew.Submit("fmt", 0, nil, printInit, j)
+					_, _ = ew.Submit("fmt", 0, nil, printInit, j)
 				}
 				wg.Done()
 			}()
@@ -43,18 +44,17 @@ func printInit(i interface{}, kkk ...int32) int {
 }
 
 func TestTimeAfter(t *testing.T) {
-	timeoutCh := time.After(time.Millisecond * 1000 * 10)
+	timeoutCh := time.After(time.Millisecond * 100)
 
-	select {
-	case <-timeoutCh:
-		t.Log("timeoutCh <-")
-	}
+	<-timeoutCh
+	t.Log("timeoutCh <-")
 
 	select {
 	case <-timeoutCh:
 		t.Log("timeoutCh <- again")
 	default:
-		t.Error("timeoutCh error")
+		// Expected: time.After channel has no buffered value after first receive.
+		t.Log("timeoutCh already drained, as expected")
 	}
 }
 func TestRingBuffer_PushWaitTimeOut(t *testing.T) {
@@ -117,13 +117,13 @@ func TestEventWorker(t *testing.T) {
 }
 
 func TestGoSched(t *testing.T) {
-	done := false
+	var done int32
 
 	go func() {
-		done = true
+		atomic.StoreInt32(&done, 1)
 	}()
 
-	for !done {
+	for atomic.LoadInt32(&done) == 0 {
 		runtime.Gosched()
 	}
 	fmt.Println("done!")

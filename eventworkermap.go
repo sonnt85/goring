@@ -264,7 +264,7 @@ func (ew *EventWorkerMap[K]) dispatch() {
 		ew.pauseWorker.WaitWhile(func(b bool) bool {
 			return b
 		})
-		var task = new(funcmap.Task[K])
+		var task *funcmap.Task[K]
 		var ok bool
 		ew.brocastSubmit.WaitWhile(func(b struct{}) bool {
 			_, task, ok = ew.qm.GetRandomThenDelete()

@@ -263,8 +263,7 @@ func (ew *EventWorker[K]) dispatch() {
 		ew.pauseWorker.WaitWhile(func(b bool) bool {
 			return b
 		})
-		var task = new(funcmap.Task[K])
-		task = ew.q.PopWait()
+		task := ew.q.PopWait()
 		if task.IsIgnore() {
 			continue
 		}

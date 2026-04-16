@@ -126,22 +126,6 @@ func (pl *EventLinkedList[T]) Current() (T, error) {
 	}
 }
 
-func (pl *EventLinkedList[T]) _seek(n int) (T, error) {
-	var zero T
-	pl.cond.L.Lock()
-	defer pl.cond.L.Unlock()
-	lenbuf := len(pl.buf)
-	if lenbuf == 0 {
-		return zero, ErrIsEmpty
-	} else {
-		if (n >= 0 && n <= lenbuf) || (n < 0 && -n <= lenbuf) {
-			pl.r = (pl.r + lenbuf + n) % lenbuf
-			return pl.buf[pl.r], nil
-		} else {
-			return zero, ErrOverflow
-		}
-	}
-}
 
 func (pl *EventLinkedList[T]) Remove(n int) error {
 	pl.cond.L.Lock()

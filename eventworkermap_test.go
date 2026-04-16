@@ -23,7 +23,7 @@ func BenchmarkEventWorkerMap(b *testing.B) {
 			wg.Add(1)
 			go func() {
 				for j := 0; j < b.N; j++ {
-					ew.Submit("fmt", 0, nil, printInit, j)
+					_, _ = ew.Submit("fmt", 0, nil, printInit, j)
 				}
 				wg.Done()
 			}()
