@@ -83,6 +83,10 @@ val2 := consumer.Get()
 
 Same API as `EventWorker[K]` but uses a map as backing store (newer submission for same key replaces previous).
 
+## Author
+
+**sonnt85** — [thanhson.rf@gmail.com](mailto:thanhson.rf@gmail.com)
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
