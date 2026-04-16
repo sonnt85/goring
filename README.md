@@ -1,5 +1,7 @@
 # goring
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/sonnt85/goring.svg)](https://pkg.go.dev/github.com/sonnt85/goring)
+
 Generic ring buffer and concurrent worker pool for Go, with blocking/non-blocking push/pop, multi-reader support, and event-driven task dispatch.
 
 ## Installation
@@ -58,8 +60,12 @@ val2 := consumer.Get()
 - `Pop() (T, error)` / `PopWait() T` / `TryPop() (T, error)` — read one element
 - `Write(p []T)` / `WriteWait(p []T)` / `TryWrite(p []T)` — write slice
 - `Read(p []T)` / `ReadWait(p []T)` / `ReadAll()` / `ReadAllWait()` — read slice
+- `TryRead(p []T) (n int, err error)` — non-blocking read; returns `ErrAcquireLock` if lock is unavailable
+- `TryReadAll() ([]T, error)` — non-blocking read of all available elements
 - `PushWaitTimeOut(c T, timeout time.Duration) error` — push with deadline
 - `ReadWaitTimeOut(c []T, timeout time.Duration, ctxs ...context.Context)` — read with deadline
+- `WaitUntilNotFull()` — block until the buffer has at least one free slot
+- `WaitUntilEmpty()` — block until the buffer is completely drained
 - `Length() int` / `Capacity() int` / `Free() int` / `IsEmpty() bool` / `IsFull() bool`
 - `Reset()` / `Resize()` / `Copy() []T` / `Stats()`
 
@@ -76,12 +82,36 @@ val2 := consumer.Get()
 - `NewEventWorker[K](maxWorkers, buffsize int, defaultExpiration, errorTTL time.Duration) *EventWorker[K]`
 - `Submit` / `SubmitForce` / `TrySubmit` / `SubmitWithTimeout` / `SubmitWaitDone`
 - `GetSavedTask(id K)` / `GetResultTask(id K)` / `WaitUntilTaskFinishThenDelete(id K)`
+- `GetSavedTaskThenDelete(id K) (*Task, bool)` — retrieve a saved task and remove it from the store
+- `GetResultTaskThenDelete(id K) ([]interface{}, bool, bool)` — retrieve task result values and remove the task
+- `GetNumFinishTask() uint32` — return the total number of completed tasks
+- `OnEvictedSavedTask(f func(K, *Task))` — register a callback invoked when a saved task expires or is evicted
+- `OnEvictedFinishTask(f func(*Task))` — register a callback invoked each time a task finishes successfully
+- `Stopped() bool` — return true if the queue is currently empty
 - `WaitUntilAllTaskFinish()` / `EnableWorker()` / `DisableWorker()` / `EnableQueue()` / `DisableQueue()`
 - `Stats()` / `Size()` / `ConfigMaxWorker(n int)`
 
 ### EventWorkerMap[K]
 
 Same API as `EventWorker[K]` but uses a map as backing store (newer submission for same key replaces previous).
+
+### EventLinkedList[T]
+
+A generic ordered list with a movable read cursor, designed for cycling through a fixed set of items.
+
+- `NewEventLinkedList[T]() *EventLinkedList[T]` — create an empty linked list
+- `Next() (T, error)` — advance the cursor forward by one and return the element
+- `NextWait() (T, error)` — like `Next` but blocks until the list is non-empty
+- `Prev() (T, error)` — move the cursor backward by one and return the element
+- `PrevWait() (T, error)` — like `Prev` but blocks until the list is non-empty
+- `Seek(n int) (T, error)` — move the cursor by `n` steps (positive or negative) and return the element
+- `SeekWait(n int) (T, error)` — like `Seek` but blocks until the list is non-empty
+- `Current() (T, error)` — return the element at the current cursor position without moving
+- `Insert(n int, els ...T) error` — insert elements before position `n`
+- `Remove(n int) error` — remove the element at position `n`
+- `Copy() ([]T, error)` — return a snapshot copy of the entire list
+- `UpdateNewEventLinkedList(p []T) bool` — atomically replace list contents if they differ; broadcasts to waiting goroutines; returns true if changed
+- `Length() int` / `Reset()` / `String() string`
 
 ## Author
 
