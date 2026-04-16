@@ -275,6 +275,9 @@ func (ew *EventWorkerMap[K]) dispatch() {
 			return cnt < ew.maxWorkers
 		})
 
+		ew.numWorkerRunning.Edit(func(cnt int) int {
+			return cnt + 1
+		})
 		go func() {
 			var err error
 			defer func() {
@@ -290,13 +293,8 @@ func (ew *EventWorkerMap[K]) dispatch() {
 				}
 			}
 			ew.numWorkerRunning.EditThenSendBroadcast(func(cnt int) int { //has new finish
-				cnt--
-				return cnt
+				return cnt - 1
 			})
 		}()
-		ew.numWorkerRunning.Edit(func(cnt int) int {
-			cnt++
-			return cnt
-		})
 	}
 }

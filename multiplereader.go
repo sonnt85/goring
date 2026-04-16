@@ -11,6 +11,13 @@ var (
 	ErrInvalidBufferSize = errors.New("buffer must be of size 2^n")
 )
 
+// paddedUint32 pads a uint32 to a full 64-byte cache line to prevent false sharing
+// between adjacent elements when multiple goroutines update them concurrently.
+type paddedUint32 struct {
+	v uint32
+	_ [60]byte // pad to 64-byte cache line
+}
+
 type RingMultipleReader[T any] struct {
 	length            uint32
 	bitWiseLength     uint32
@@ -21,8 +28,8 @@ type RingMultipleReader[T any] struct {
 	*sync.Cond
 	readEvent         *sync.Cond
 	buffer            []T
-	readerPointers    []uint32
-	readerActiveFlags []uint32
+	readerPointers    []paddedUint32
+	readerActiveFlags []paddedUint32
 }
 
 type Consumer[T any] struct {
@@ -45,8 +52,8 @@ func NewRingMultipleReader[T any](size uint32, maxConsumers uint32) (rmr *RingMu
 		maximumConsumerId: 0,
 		maxConsumers:      int(maxConsumers),
 		RWMutex:           &sync.RWMutex{},
-		readerPointers:    make([]uint32, maxConsumers),
-		readerActiveFlags: make([]uint32, maxConsumers),
+		readerPointers:    make([]paddedUint32, maxConsumers),
+		readerActiveFlags: make([]paddedUint32, maxConsumers),
 	}
 	rmr.readEvent = sync.NewCond(&sync.Mutex{})
 	rmr.Cond = sync.NewCond(rmr.RWMutex)
@@ -67,7 +74,7 @@ func (r *RingMultipleReader[T]) NewConsumer() (Consumer[T], error) {
 	var newConsumerId = r.maxConsumers
 
 	for i := range r.readerActiveFlags {
-		if atomic.LoadUint32(&r.readerActiveFlags[i]) == 0 {
+		if atomic.LoadUint32(&r.readerActiveFlags[i].v) == 0 {
 			newConsumerId = i
 			break
 		}
@@ -81,8 +88,8 @@ func (r *RingMultipleReader[T]) NewConsumer() (Consumer[T], error) {
 		atomic.AddUint32(&r.maximumConsumerId, 1)
 	}
 
-	r.readerPointers[newConsumerId] = atomic.LoadUint32(&r.headPointer) - 1
-	atomic.StoreUint32(&r.readerActiveFlags[newConsumerId], 1)
+	r.readerPointers[newConsumerId].v = atomic.LoadUint32(&r.headPointer) - 1
+	atomic.StoreUint32(&r.readerActiveFlags[newConsumerId].v, 1)
 
 	return Consumer[T]{
 		id:   uint32(newConsumerId),
@@ -94,7 +101,7 @@ func (r *RingMultipleReader[T]) removeConsumer(consumerId uint32) {
 	r.RLock()
 	defer r.RUnlock()
 
-	atomic.StoreUint32(&r.readerActiveFlags[consumerId], 0)
+	atomic.StoreUint32(&r.readerActiveFlags[consumerId].v, 0)
 	atomic.CompareAndSwapUint32(&r.maximumConsumerId, consumerId, r.maximumConsumerId-1)
 }
 
@@ -125,8 +132,8 @@ func (r *RingMultipleReader[T]) Write(value T) {
 
 		for i = 0; i < atomic.LoadUint32(&r.maximumConsumerId); i++ {
 
-			if atomic.LoadUint32(&r.readerActiveFlags[i]) == 1 {
-				currentReadPosition = atomic.LoadUint32(&r.readerPointers[i]) + r.length
+			if atomic.LoadUint32(&r.readerActiveFlags[i].v) == 1 {
+				currentReadPosition = atomic.LoadUint32(&r.readerPointers[i].v) + r.length
 
 				if currentReadPosition < lastTailReaderPointerPosition {
 					lastTailReaderPointerPosition = currentReadPosition
@@ -150,7 +157,7 @@ func (r *RingMultipleReader[T]) Write(value T) {
 
 func (r *RingMultipleReader[T]) readIndex(consumerId uint32) T {
 
-	var newIndex = atomic.AddUint32(&r.readerPointers[consumerId], 1)
+	var newIndex = atomic.AddUint32(&r.readerPointers[consumerId].v, 1)
 
 	// yield until work is available
 	for newIndex >= atomic.LoadUint32(&r.headPointer) {

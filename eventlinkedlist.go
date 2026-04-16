@@ -189,9 +189,9 @@ func (pl *EventLinkedList[T]) Insert(n int, els ...T) error {
 					pl.buf = append(pl.buf, ene)
 					return nil
 				} else {
-					copy(newbuf, pl.buf[:n-1])
-					copy(newbuf[n:], els)
-					copy(newbuf[lenbuf+lenels:], els)
+					copy(newbuf[:n], pl.buf[:n])
+					copy(newbuf[n:n+lenels], els)
+					copy(newbuf[n+lenels:], pl.buf[n:])
 				}
 				pl.buf = newbuf
 			}
