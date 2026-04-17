@@ -67,18 +67,14 @@ func TestRingBuffer_PushWaitTimeOut(t *testing.T) {
 	var n int
 	n, err = rb.WriteWaitTimeOut([]int{2, 3, 4, 5, 6, 7, 8, 9}, time.Second*100)
 	t.Log("n: ", n)
-
 	assert.NoError(t, err)
-	// time.Sleep(time.Second * 10)
-	// rb.Reset()
+
 	err = rb.PushWaitTimeOut(3, time.Second*100)
 	assert.NoError(t, err)
 	p := make([]int, 100)
 	_, err = rb.ReadWaitTimeOut(p, time.Second*100)
 	assert.NoError(t, err)
 	t.Logf("%+v", p)
-	t.Log("\ndone")
-
 }
 
 func TestEventWorker(t *testing.T) {
@@ -94,28 +90,24 @@ func TestEventWorker(t *testing.T) {
 					log.Println("timeout, deleting client: ", val)
 				}
 			}
-			// log.Info("timeout, deleting client:")
 		}
 	})
-	ew.EnableWorker() //start run worker
+	ew.EnableWorker()
 
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
 	go func() {
-		var i int
-		for i = 0; i < 8; i++ {
-			//, any([]int{1, 2, 3}
+		defer wg.Done()
+		for i := 0; i < 8; i++ {
 			_, err := ew.Submit("fmt", 0, nil, printInit, i, int32(i))
 			require.Nil(t, err)
-			runtime.Gosched() //for other goroutine run
+			runtime.Gosched()
 		}
-		wg.Done() //sumit done
 	}()
-	wg.Wait() //wait finish submit
+	wg.Wait()
 	ew.WaitUntilAllTaskFinish()
 	time.Sleep(time.Second * 2)
 	ppjson.Println(ew.Stats())
-	fmt.Println("Done")
 }
 
 func TestGoSched(t *testing.T) {
@@ -128,5 +120,4 @@ func TestGoSched(t *testing.T) {
 	for atomic.LoadInt32(&done) == 0 {
 		runtime.Gosched()
 	}
-	fmt.Println("done!")
 }

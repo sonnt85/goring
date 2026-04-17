@@ -14,30 +14,25 @@ import (
 )
 
 func BenchmarkEventWorkerMap(b *testing.B) {
-	step := 1024 * 10
-	for i := step; i < 1024*100; i += step {
-		ew := NewEventWorker[string](0, i, 0, 0)
-		ew.EnableWorker()
-		wg := new(sync.WaitGroup)
-		b.Run(fmt.Sprintf("buffer_size: %d", i), func(b *testing.B) {
-			wg.Add(1)
-			go func() {
-				for j := 0; j < b.N; j++ {
-					_, _ = ew.Submit("fmt", 0, nil, printInit, j)
-				}
-				wg.Done()
-			}()
-			wg.Wait()
+	for _, size := range []int{1024, 4096, 16384, 65536} {
+		size := size
+		b.Run(fmt.Sprintf("buf=%d", size), func(b *testing.B) {
+			ew := NewEventWorker[string](0, size, 0, 0)
+			ew.EnableWorker()
+			b.ResetTimer()
+			for j := 0; j < b.N; j++ {
+				_, _ = ew.Submit("noop", 0, nil, benchNoopWork, j)
+			}
 			ew.WaitUntilAllTaskFinish()
 		})
 	}
 }
 
+// _printInit mirrors printInit but writes to the test log instead of stdout.
+// Kept as a regular function (not a method on *testing.T) to match the
+// funcmap.Task signature expected by EventWorkerMap.Submit.
 func _printInit(i interface{}, kkk ...int32) int {
-	// i = i + 1
-	fmt.Println("i: ", i)
-	fmt.Println("kkk: ", kkk)
-
+	fmt.Println("i: ", i, " kkk: ", kkk)
 	ret, _ := i.(int)
 	return ret
 }
@@ -55,26 +50,22 @@ func TestEventWorkerMap(t *testing.T) {
 					log.Println("timeout, deleting client: ", val)
 				}
 			}
-			// log.Info("timeout, deleting client:")
 		}
 	})
 
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
 	go func() {
-		var i int
-		for i = 0; i < 8; i++ {
-			//, any([]int{1, 2, 3}
+		defer wg.Done()
+		for i := 0; i < 8; i++ {
 			_, err := ew.Submit("fmt", 0, func() string { return "_printInit" }, _printInit, i, int32(i))
 			require.Nil(t, err)
 			runtime.Gosched()
 		}
-		wg.Done() //sumit done
 	}()
-	wg.Wait()         //wait finish submit
-	ew.EnableWorker() //start run worker
+	wg.Wait()
+	ew.EnableWorker()
 	ew.WaitUntilAllTaskFinish()
 	time.Sleep(time.Second * 3)
 	ppjson.Println(ew.Stats())
-	fmt.Println("Done")
 }
