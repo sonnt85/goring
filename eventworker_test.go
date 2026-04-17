@@ -15,32 +15,34 @@ import (
 	"github.com/zeebo/assert"
 )
 
+// benchNoopWork is a silent work function used in benchmarks so that the
+// benchmarked throughput is not dominated by fmt.Printf I/O.
+func benchNoopWork(i interface{}, _ ...int32) int {
+	ret, _ := i.(int)
+	return ret
+}
+
+// printInit is kept for TestEventWorker which uses printed output as a
+// visual smoke test of task execution.
+func printInit(i interface{}, kkk ...int32) int {
+	fmt.Printf("i/kkk - %+v/%+v\n", i, kkk)
+	ret, _ := i.(int)
+	return ret
+}
+
 func BenchmarkEventWorker(b *testing.B) {
-	step := 1024 * 10
-	for i := step; i < 1024*100; i += step {
-		ew := NewEventWorker[string](0, i, 0, 0)
-		ew.EnableWorker()
-		wg := new(sync.WaitGroup)
-		b.Run(fmt.Sprintf("buffer_size: %d", i), func(b *testing.B) {
-			wg.Add(1)
-			go func() {
-				for j := 0; j < b.N; j++ {
-					_, _ = ew.Submit("fmt", 0, nil, printInit, j)
-				}
-				wg.Done()
-			}()
-			wg.Wait()
+	for _, size := range []int{1024, 4096, 16384, 65536} {
+		size := size
+		b.Run(fmt.Sprintf("buf=%d", size), func(b *testing.B) {
+			ew := NewEventWorker[string](0, size, 0, 0)
+			ew.EnableWorker()
+			b.ResetTimer()
+			for j := 0; j < b.N; j++ {
+				_, _ = ew.Submit("noop", 0, nil, benchNoopWork, j)
+			}
 			ew.WaitUntilAllTaskFinish()
 		})
 	}
-}
-
-func printInit(i interface{}, kkk ...int32) int {
-	// i = i + 1
-	fmt.Printf("i/kkk - %+v/%+v\n", i, kkk)
-
-	ret, _ := i.(int)
-	return ret
 }
 
 func TestTimeAfter(t *testing.T) {

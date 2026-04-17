@@ -28,7 +28,7 @@ type RingBuffer[T any] struct {
 	r                  int // next position to read
 	w                  int // next position to write
 	isFull             bool
-	mu                 *sync.RWMutex
+	mu                 *sync.Mutex
 	eventwrite         *sync.Cond
 	eventbroacastwrite *sync.Cond
 	eventread          *sync.Cond
@@ -37,7 +37,7 @@ type RingBuffer[T any] struct {
 
 // New returns a new RingBuffer whose buffer has the given size.
 func NewRing[T any](size int) *RingBuffer[T] {
-	mu := new(sync.RWMutex)
+	mu := new(sync.Mutex)
 	ringbuf := RingBuffer[T]{
 		buf:                make([]T, size),
 		size:               size,
@@ -370,26 +370,26 @@ func (r *RingBuffer[T]) PopWait() (b T) {
 }
 
 func (r *RingBuffer[T]) WaitUntilNotFull() {
-	r.mu.RLock()
+	r.mu.Lock()
 	if r.isfull() {
-		r.mu.RUnlock() //unlock free lockwriteread
+		r.mu.Unlock() //unlock free lockwriteread
 		r.eventbroacastread.L.Lock()
 		r.eventbroacastread.Wait() //wait for any data to be read
 		r.eventbroacastread.L.Unlock()
 		return
 	} else {
-		r.mu.RUnlock()
+		r.mu.Unlock()
 	}
 }
 
 func (r *RingBuffer[T]) WaitUntilEmpty() {
 	for {
-		r.mu.RLock()
+		r.mu.Lock()
 		if r.isempty() {
-			r.mu.RUnlock() //unlock free lockwriteread
+			r.mu.Unlock() //unlock free lockwriteread
 			return
 		}
-		r.mu.RUnlock() //unlock free lockwriteread
+		r.mu.Unlock() //unlock free lockwriteread
 		r.eventbroacastread.L.Lock()
 		r.eventbroacastread.Wait()
 		r.eventbroacastread.L.Unlock()
@@ -622,8 +622,8 @@ func (r *RingBuffer[T]) TryPush(c T) error {
 
 // Length return the length of available read bytes.
 func (r *RingBuffer[T]) Length() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.length()
 }
 
@@ -649,8 +649,8 @@ func (r *RingBuffer[T]) Capacity() int {
 
 // Free returns the length of available bytes to write.
 func (r *RingBuffer[T]) Free() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.free()
 }
 
@@ -672,8 +672,8 @@ func (r *RingBuffer[T]) free() int {
 
 // Copy returns all available read elements. It does not move the read pointer and only copy the available data.
 func (r *RingBuffer[T]) Copy() []T {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	if r.w == r.r {
 		if r.isFull {
@@ -708,8 +708,8 @@ func (r *RingBuffer[T]) Copy() []T {
 
 // IsFull returns this ringbuffer is full.
 func (r *RingBuffer[T]) IsFull() bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.isfull()
 }
 
@@ -755,8 +755,8 @@ func (r *RingBuffer[T]) resize() (changed bool) {
 
 // IsEmpty returns this ringbuffer is empty.
 func (r *RingBuffer[T]) IsEmpty() bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.isempty()
 }
 

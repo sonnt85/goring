@@ -1,0 +1,4 @@
+worktrees/
+coverage.out
+*.prof
+*.test
