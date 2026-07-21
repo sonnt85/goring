@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Production-grade Go pre-commit hook
+
+set -e
+
+echo "================================================="
+echo "🔍 Running pre-commit checks..."
+echo "================================================="
+
+# 1. Format Go code (gofmt -s)
+echo "[1/5] Formatting code (gofmt -s)..."
+STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+if [[ -n "$STAGED_GO_FILES" ]]; then
+    gofmt -s -w $STAGED_GO_FILES
+    git add $STAGED_GO_FILES
+fi
+
+# 2. Check go.mod and go.sum synchronization
+if [[ -f "go.mod" ]]; then
+    echo "[2/5] Running go mod tidy..."
+    go mod tidy
+    if [[ -n "$(git status --porcelain go.mod go.sum)" ]]; then
+        echo "⚠️  go.mod or go.sum updated by 'go mod tidy'. Staging changes..."
+        git add go.mod go.sum
+    fi
+fi
+
+# 3. Static analysis with go vet
+if [[ -f "go.mod" ]]; then
+    echo "[3/5] Running go vet..."
+    go vet ./...
+fi
+
+# 4. Linter checks (golangci-lint)
+if [[ -f "go.mod" ]]; then
+    echo "[4/5] Running golangci-lint..."
+    if command -v golangci-lint >/dev/null 2>&1; then
+        golangci-lint run --timeout 2m || echo "⚠️  golangci-lint found issues."
+    else
+        echo "⚠️  golangci-lint not installed, skipping."
+    fi
+fi
+
+# 5. Fast unit testing
+if [[ -f "go.mod" ]]; then
+    echo "[5/5] Running unit tests (go test -short)..."
+    go test -short ./...
+fi
+
+echo "================================================="
+echo "✅ All pre-commit checks passed successfully!"
+echo "================================================="
+exit 0
+

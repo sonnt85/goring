@@ -26,7 +26,7 @@ type RingMultipleReader[T any] struct {
 	maxConsumers      int
 	rwmu              *sync.RWMutex // protects buffer writes
 	writeCond         *sync.Cond    // signals new data available (uses its own Mutex, not rwmu)
-	readEvent         *sync.Cond   // signals reads completed
+	readEvent         *sync.Cond    // signals reads completed
 	buffer            []T
 	readerPointers    []paddedUint32
 	readerActiveFlags []paddedUint32

@@ -126,7 +126,6 @@ func (pl *EventLinkedList[T]) Current() (T, error) {
 	}
 }
 
-
 func (pl *EventLinkedList[T]) Remove(n int) error {
 	pl.cond.L.Lock()
 	defer pl.cond.L.Unlock()
